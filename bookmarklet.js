@@ -10,12 +10,12 @@
   const host = document.createElement('section');
   host.id = 'xqc-native-panel';
   host.setAttribute('aria-label','𝕏侧栏 · 用户主页');
-  host.dataset.version='2.9';
-  host.innerHTML = '<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">刷新后需重新点击「开启x侧栏」</span></div></div><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div>';
+  host.dataset.version='3.0';
+  host.innerHTML = '<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">整页刷新需要重新点击书签，开启侧边栏</span><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer">更新地址</a></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></div></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div>';
   const style = document.createElement('style');
   // X portals live outside this panel; keep native menus/dialogs above it.
   // Removing this style on cleanup restores the original layering.
-  style.textContent = `#layers{z-index:101!important}#xqc-native-panel{position:fixed;top:0;bottom:0;right:0;width:var(--xqc-width,380px);z-index:100;background:Canvas;color:CanvasText;border-left:1px solid color-mix(in srgb,CanvasText 12%,transparent);box-shadow:-12px 0 48px #00000007;scrollbar-width:thin;scrollbar-color:#88888866 transparent;overflow:auto;overscroll-behavior:contain;color-scheme:light dark}#xqc-native-panel>header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;min-height:38px;gap:12px;position:sticky;top:0;background:Canvas;z-index:5;font:14px system-ui;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent)}#xqc-native-panel>p{margin:20px;padding:18px 20px;border:1px solid color-mix(in srgb,CanvasText 10%,transparent);border-radius:14px;background:color-mix(in srgb,CanvasText 3%,Canvas);white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 system-ui}#xqc-native-panel>p button{margin-top:10px;padding:4px 10px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;cursor:pointer}#xqc-native-panel>p a{color:inherit}#xqc-native-panel .xqc-brand{display:flex;align-items:center;gap:11px}#xqc-native-panel .xqc-mark{width:26px;height:26px;display:grid;place-items:center;color:CanvasText}#xqc-native-panel .xqc-brand strong{display:block;font-size:15px;letter-spacing:1px}#xqc-native-panel .xqc-caption{display:block;margin-top:3px;font-size:11px;letter-spacing:.3px;opacity:.55}#xqc-native-panel>header button{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;padding:0;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:50%;background:transparent;color:inherit;font:23px/1 system-ui;cursor:pointer}#xqc-native-panel>header button:hover{background:color-mix(in srgb,CanvasText 7%,Canvas)}#xqc-native-panel>header button:focus-visible{outline:2px solid CanvasText;outline-offset:3px}#xqc-native-panel .xqc-root main{width:100%;max-width:100%;min-width:0}#xqc-native-panel .xqc-root aside,#xqc-native-panel [data-testid="sidebarColumn"]{display:none!important}#xqc-native-panel [data-testid="primaryColumn"]{width:100%!important;min-width:0!important;max-width:100%!important}#xqc-native-panel .xqc-root:has(>div){min-height:50px}`;
+  style.textContent = `#layers{z-index:101!important}#xqc-native-panel{position:fixed;top:0;bottom:0;right:0;width:var(--xqc-width,380px);z-index:100;background:Canvas;color:CanvasText;border-left:1px solid color-mix(in srgb,CanvasText 12%,transparent);box-shadow:-12px 0 48px #00000007;scrollbar-width:thin;scrollbar-color:#88888866 transparent;overflow:auto;overscroll-behavior:contain;color-scheme:light dark}#xqc-native-panel>header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;min-height:38px;gap:12px;position:sticky;top:0;background:Canvas;z-index:5;font:14px system-ui;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent)}#xqc-native-panel>p{margin:20px;padding:18px 20px;border:1px solid color-mix(in srgb,CanvasText 10%,transparent);border-radius:14px;background:color-mix(in srgb,CanvasText 3%,Canvas);white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 system-ui}#xqc-native-panel>p button{margin-top:10px;padding:4px 10px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;cursor:pointer}#xqc-native-panel>p a{color:inherit}#xqc-native-panel .xqc-brand{display:flex;align-items:center;gap:11px}#xqc-native-panel .xqc-mark{width:26px;height:26px;display:grid;place-items:center;color:CanvasText}#xqc-native-panel .xqc-brand strong{display:block;font-size:15px;letter-spacing:1px}#xqc-native-panel .xqc-update{display:inline-block;margin-top:4px;color:inherit;font:11px system-ui;text-underline-offset:2px;opacity:.7}#xqc-native-panel .xqc-actions{display:flex;flex-shrink:0;gap:6px}#xqc-native-panel .xqc-caption{display:block;margin-top:3px;font-size:11px;letter-spacing:.3px;opacity:.55}#xqc-native-panel .xqc-actions button{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;padding:0;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:50%;background:transparent;color:inherit;font:23px/1 system-ui;cursor:pointer}#xqc-native-panel .xqc-actions button:hover{background:color-mix(in srgb,CanvasText 7%,Canvas)}#xqc-native-panel .xqc-actions button:focus-visible{outline:2px solid CanvasText;outline-offset:3px}#xqc-native-panel .xqc-root main{width:100%;max-width:100%;min-width:0}#xqc-native-panel .xqc-root aside,#xqc-native-panel [data-testid="sidebarColumn"]{display:none!important}#xqc-native-panel [data-testid="primaryColumn"]{width:100%!important;min-width:0!important;max-width:100%!important}#xqc-native-panel .xqc-root:has(>div){min-height:50px}`;
   document.head.append(style); document.body.append(host);
   // #layers itself can have z-index 101 while its ancestors remain in a
   // z-index:0 stacking context. A body-level panel still covers that entire
@@ -69,7 +69,8 @@
     }, 15000);
   }
   async function restart(handle) {
-    if (disposed || nativeError || handle !== desiredHandle) return;
+    if (disposed || handle !== desiredHandle) return;
+    nativeError = undefined;
     clearTimeout(timeout); observer?.disconnect(); root?.unmount(); memory?.destroy?.();
     root = secondary = memory = observer = ready = undefined;
     await open(handle, true);
@@ -77,7 +78,7 @@
   function captureError(error, info) {
     if (disposed) return;
     clearTimeout(timeout);
-    nativeError = ['原生组件异常（v2.9）', String(error?.message || error).slice(0,1800),
+    nativeError = ['原生组件异常（v3.0）', String(error?.message || error).slice(0,1800),
       String(error?.stack || '').slice(0,2800), String(info?.componentStack || '').slice(0,2800)]
       .filter(Boolean).join('\n\n');
     report(nativeError);
@@ -90,7 +91,11 @@
     layerObserver.disconnect(); observer?.disconnect(); root?.unmount(); memory?.destroy?.(); host.remove(); style.remove(); delete window[key];
   };
   window[key] = clean;
-  host.querySelector('button').onclick = clean;
+  host.querySelector('[aria-label="关闭𝕏侧栏"]').onclick = clean;
+  host.querySelector('[aria-label="重新加载侧栏"]').onclick = () => {
+    if (desiredHandle) void restart(desiredHandle);
+    else report('请先点击左侧头像。');
+  };
   function pageElement(selector) {
     return [...document.querySelectorAll(selector)].find(node =>
       !host.contains(node) && node.getBoundingClientRect().width > 0);
