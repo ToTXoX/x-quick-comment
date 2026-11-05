@@ -36,7 +36,11 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     for(const file of ['x-live-vendor.js','x-live-main.js'])await page.addScriptTag({content:fs.readFileSync(path.join(dir,file),'utf8')});
     await page.evaluate(()=>{
       const R=fixtureRequire(174394),DOM=fixtureRequire(214659),RR=fixtureRequire(518756),H=fixtureRequire(533418);
-      const C=R.createContext('missing');let mounts=0;
+      const C=R.createContext('missing'),StoreContext=R.createContext(null);let mounts=0;
+      const storeState={entities:{tweets:{entities:{'123456789':{favorited:false}}}}},listeners=new Set();
+      const fakeStore={getState:()=>storeState,subscribe:fn=>{listeners.add(fn);return ()=>listeners.delete(fn);},
+        setFavorited:value=>{storeState.entities.tweets.entities['123456789'].favorited=value;for(const fn of listeners)fn();}};
+      window.fixtureTweetStore=fakeStore;
       function Notifications(){const [count,set]=R.useState(0);R.useEffect(()=>{mounts++;window.notificationMounts=mounts;},[]);return R.createElement('main',null,R.createElement('section',{'data-testid':'primaryColumn'},
         R.createElement('button',{id:'increment',onClick:()=>set(count+1)},'count '+count),
         ...['alice','bob','broken','hanging'].map(name=>R.createElement('a',{href:'/'+name,key:name},R.createElement('span',{'data-testid':'UserAvatar-Container-'+name},name)))));}
@@ -78,6 +82,10 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         return R.createElement('article',null,
           R.createElement('h2',null,params.screenName+' '+value),
           R.createElement('a',{href:'/bob/photo'},R.createElement('span',{'data-testid':'UserAvatar-Container-bob'},'bob avatar')),
+          R.createElement('div',{'data-testid':'tweet'},
+            R.createElement('a',{href:'/'+params.screenName+'/status/123456789'},'tweet time'),
+            R.createElement('button',{'data-testid':'like',id:'fixture-like',onClick:()=>fakeStore.setFavorited(true)},
+              R.createElement('svg',{width:16,height:16},R.createElement('path',{d:'M1 1h10v10H1z'})),'Like')),
           R.createElement(RepostMenu),
           R.createElement(NativeLink,{id:'quote-link',to:{pathname:'/compose/post',state:{quotedStatus:{id_str:'111222333'}}}},'Quote directly'),
           R.createElement('output',{id:'query'},JSON.stringify({filter,sort,search:location.search})),
@@ -129,16 +137,24 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       window.fixtureNativeHistory=nativeHistory;
       const mainHistory=H.createMemoryHistory({initialEntries:[location.pathname]});
       window.fixtureMainHistory=mainHistory;
-      DOM.createRoot(document.querySelector('#app')).render(R.createElement(C.Provider,{value:'shared-context'},R.createElement(RR.Router,{history:mainHistory},R.createElement(RR.Switch,null,
+      const appTree=R.createElement(C.Provider,{value:'shared-context'},R.createElement(RR.Router,{history:mainHistory},R.createElement(RR.Switch,null,
         R.createElement(RR.Route,{path:['/notifications','/home'],exact:true,component:Notifications}),
         R.createElement(RR.Route,{path:'/compose/post',component:Compose}),
         R.createElement(RR.Route,{path:'/:screenName/status/:id',exact:true,component:StatusPage}),
-        R.createElement(RR.Route,{path:'/:screenName',exact:true,component:ProfilePage})))));
+        R.createElement(RR.Route,{path:'/:screenName',exact:true,component:ProfilePage}))));
+      DOM.createRoot(document.querySelector('#app')).render(R.createElement(StoreContext.Provider,{value:{store:fakeStore}},appTree));
     });
     await page.locator('#increment').click();
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
     await page.locator('#app [data-testid="UserAvatar-Container-alice"]').click();
     await page.getByRole('heading',{name:'alice shared-context'}).waitFor({timeout:3000}).catch(async e=>{console.error(await page.locator('#xqc-native-panel').innerText());throw e;});
+    await page.locator('#xqc-native-panel #fixture-like').click();
+    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel #fixture-like')?.classList.contains('xqc-liked-from-store'));
+    assert.equal(await page.locator('#xqc-native-panel #fixture-like svg').evaluate(el=>getComputedStyle(el).color),'rgb(249, 24, 128)');
+    assert.equal(await page.locator('#xqc-native-panel #fixture-like').getAttribute('data-testid'),'like');
+    assert.equal(await page.evaluate(()=>fixtureTweetStore.getState().entities.tweets.entities['123456789'].favorited),true);
+    await page.evaluate(()=>fixtureTweetStore.setFavorited(false));
+    await page.waitForFunction(()=>!document.querySelector('#xqc-native-panel #fixture-like')?.classList.contains('xqc-liked-from-store'));
     assert.deepEqual(JSON.parse(await page.locator('#query').innerText()),{search:''});
     await page.locator('#filter').click();
     assert.deepEqual(JSON.parse(await page.locator('#query').innerText()),{filter:'photo',sort:'popular',search:'?filter=photo&sort=popular'});
