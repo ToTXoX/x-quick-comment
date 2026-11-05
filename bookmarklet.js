@@ -2,15 +2,21 @@
   'use strict';
   const key = '__xQuickComment';
   if (window[key]) { window[key](); return; }
-  if (location.origin !== 'https://x.com' || !/^\/(?:notifications|home)(?:\/|$)/.test(location.pathname)) {
-    alert('请在已登录的 X 主页或通知页点击书签。'); return;
+  const reservedPaths = new Set(['explore','search','messages','settings','compose','i','grok','premium','jobs','communities','connect','bookmarks','lists','login','signup']);
+  function supportedPage() {
+    if (/^\/(?:notifications|home)(?:\/|$)/.test(location.pathname)) return true;
+    const match=location.pathname.match(/^\/([a-z0-9_]{1,15})(?:\/(?:with_replies|media|highlights|articles|likes|status\/\d+))?\/?$/i);
+    return !!match && !reservedPaths.has(match[1].toLowerCase());
+  }
+  if (location.origin !== 'https://x.com' || !supportedPage()) {
+    alert('请在已登录的 X 主页、通知页、用户主页或帖子页点击书签。'); return;
   }
   // Module IDs verified against the actual logged-in responsive-web bundles.
   const moduleIds = {react:174394, dom:214659, router:518756, history:533418, location:991975, nativeHistory:194436};
   const host = document.createElement('section');
   host.id = 'xqc-native-panel';
   host.setAttribute('aria-label','𝕏侧栏 · 用户主页');
-  const version = '3.2.2';
+  const version = '3.3';
   host.dataset.version=version;
   host.innerHTML = `<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">整页刷新需要重新点击书签，开启侧边栏</span></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></div></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 更新请到</span><a href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer">官网</a><span>重新获取书签</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
   const style = document.createElement('style');
@@ -101,7 +107,7 @@
     return [...document.querySelectorAll(selector)].find(node =>
       !host.contains(node) && node.getBoundingClientRect().width > 0);
   }
-  function notificationColumn() {
+  function mainColumn() {
     // A comma selector picks document order, not selector priority. On legacy X,
     // main contains BOTH primaryColumn and sidebarColumn.
     return pageElement('[data-testid="primaryColumn"]') || pageElement('main');
@@ -111,12 +117,12 @@
     const primary = pageElement('[data-testid="primaryColumn"]');
     const sidebar = pageElement('[data-testid="sidebarColumn"]') || pageElement('main aside');
     const edge = primary?.getBoundingClientRect().right ??
-      sidebar?.getBoundingClientRect().left ?? notificationColumn()?.getBoundingClientRect().right;
+      sidebar?.getBoundingClientRect().left ?? mainColumn()?.getBoundingClientRect().right;
     const available = edge == null ? 0 : document.documentElement.clientWidth - edge;
     if (available < 280) {
       host.style.width = 'min(380px, 95vw)';
       widthWarning = true;
-      report('右侧空间不足。请缩小浏览器缩放比例，使通知右侧至少留出 280px。');
+      report('右侧空间不足。请缩小浏览器缩放比例，使主栏右侧至少留出 280px。');
       return false;
     }
     host.style.width = `${available}px`;
@@ -215,9 +221,9 @@
     return history;
   }
   function findRoutes(React, Router) {
-    const main=notificationColumn();
+    const main=mainColumn();
     const leaf=main && fiberOf(main);
-    if (!leaf) throw Error('未找到通知列的 React Fiber（responsive-web）。');
+    if (!leaf) throw Error('未找到主栏的 React Fiber（responsive-web）。');
     const ancestry=[];for(let f=leaf;f;f=f.return) ancestry.push(f);
     const providers=[];
     for(const f of ancestry) {
@@ -312,14 +318,14 @@
     } catch(error) { clearTimeout(timeout); report('实验未成功：'+error.message+'\n关闭即可恢复；请把这段提示发给我。'); }
   }
   function onClick(event) {
-    if (disposed || !/^\/(?:notifications|home)(?:\/|$)/.test(location.pathname) ||
+    if (disposed || !supportedPage() ||
         !(event.target instanceof Element) || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const target=event.target, link=target.closest('a[href]');
     if(host.contains(target)) return;
     if (!target.closest('main, [data-testid="primaryColumn"]') || !link) return;
     const avatar='[data-testid^="UserAvatar-Container"],[data-testid="Tweet-User-Avatar"],img[src*="/profile_images/"],img[src*="/default_profile"]';
     if (!target.closest(avatar) && !link.querySelector(avatar)) return;
-    const url=new URL(link.href), handle=url.pathname.match(/^\/([a-z0-9_]{1,15})\/?$/i)?.[1];
+    const url=new URL(link.href), handle=url.pathname.match(/^\/([a-z0-9_]{1,15})(?:\/photo)?\/?$/i)?.[1];
     if (url.origin!==location.origin || !handle) return;
     event.preventDefault();event.stopImmediatePropagation(); void open(handle);
   }
