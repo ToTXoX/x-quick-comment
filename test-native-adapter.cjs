@@ -39,7 +39,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       const C=R.createContext('missing');let mounts=0;
       function Notifications(){const [count,set]=R.useState(0);R.useEffect(()=>{mounts++;window.notificationMounts=mounts;},[]);return R.createElement('main',null,R.createElement('section',{'data-testid':'primaryColumn'},
         R.createElement('button',{id:'increment',onClick:()=>set(count+1)},'count '+count),
-        ...['alice','bob','broken'].map(name=>R.createElement('a',{href:'/'+name,key:name},R.createElement('span',{'data-testid':'UserAvatar-Container-'+name},name)))));}
+        ...['alice','bob','broken','hanging'].map(name=>R.createElement('a',{href:'/'+name,key:name},R.createElement('span',{'data-testid':'UserAvatar-Container-'+name},name)))));}
       class SilentBoundary extends R.Component {
         state={failed:false};
         static getDerivedStateFromError(){return {failed:true};}
@@ -74,6 +74,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         // Exact failure reported from the real X profile bundle.
         const {filter,sort}=location.query;
         if(params.screenName==='broken')return R.createElement(SilentBoundary,null,R.createElement(BrokenProfile));
+        if(params.screenName==='hanging')return R.createElement(HangingProfile);
         return R.createElement('article',null,
           R.createElement('h2',null,params.screenName+' '+value),
           R.createElement(RepostMenu),
@@ -85,6 +86,12 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
           R.createElement('button',{id:'forward',onClick:()=>history.goForward()},'forward'),
           R.createElement('button',{id:'reply-state',onClick:()=>history.push({pathname:'/compose/post',state:{inReplyToStatusId:'123456789'}})},'Reply with state'),
           R.createElement('a',{href:'/compose/post'},'Reply'));
+      }
+      function HangingProfile(){
+        R.useEffect(()=>{window.hangingMounts=(window.hangingMounts||0)+1;},[]);
+        return R.createElement('main',null,
+          R.createElement('div',{'data-testid':'UserName'},'@hanging'),
+          R.createElement('div',{role:'progressbar','aria-label':'正在加载 @hanging 的帖子'}));
       }
       class ComposeScreen extends R.Component {
         componentDidMount(){
@@ -196,6 +203,17 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.match(await diagnostic.innerText(),/fixture: missing native profile context/);
     await page.locator('#xqc-native-panel>header button').click();
     assert.deepEqual(errors,[]);
-    console.log('PASS: dual routing, shared context, native composer handoff, reply state, dismissal/restoration, drafts, cleanup; nested boundary errors captured even when Error object is discarded; diagnostic stays visible. Native X profile still requires live validation.');
+    await page.clock.install();
+    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    await page.locator('[data-testid="UserAvatar-Container-hanging"]').click();
+    await page.locator('#xqc-native-panel [role=progressbar]').waitFor({state:'attached'});
+    await page.clock.fastForward(15000);
+    await page.waitForFunction(()=>window.hangingMounts===2);
+    await page.clock.fastForward(15000);
+    await page.getByRole('button',{name:'重试侧栏'}).waitFor();
+    assert.equal(await page.locator('#xqc-native-panel>[role=status] a').getAttribute('href'),'/hanging');
+    await page.locator('#xqc-native-panel>header button').click();
+    assert.deepEqual(errors,[]);
+    console.log('PASS: native routing and composer, nested errors, stalled timeline retry and fallback. Native X profile still requires live validation.');
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
