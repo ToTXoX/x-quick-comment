@@ -19,3 +19,7 @@
 - `x-split-link.user.js`：早期油猴分屏方案，当前安装页不使用。
 
 运行 `node test-native-adapter.cjs` 可测试原生路由适配；测试需要本地 X bundle 测试资源（默认 `%TEMP%/xqc-local-test`）。由于 X 的内部页面结构可能变化，真实页面仍需安装后验证。
+
+## 许可
+
+本项目采用 [MIT 许可证](LICENSE)。
