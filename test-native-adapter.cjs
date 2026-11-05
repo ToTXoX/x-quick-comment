@@ -145,9 +145,12 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await page.locator('#xqc-native-panel .xqc-footer .xqc-update').getAttribute('href'),'https://x.usdts.de/');
     assert.equal(await page.locator('#xqc-native-panel .xqc-footer .xqc-repo').getAttribute('href'),'https://github.com/ToTXoX/x-quick-comment');
     assert.equal(await page.locator('#xqc-native-panel .xqc-footer a[aria-label="dk021 的 X 主页"]').getAttribute('href'),'https://x.com/yygqdkqk');
-    assert.equal(await page.locator('#xqc-native-panel .xqc-footer a svg').count(),2);
+    assert.equal(await page.locator('#xqc-native-panel .xqc-footer-links a svg').count(),2);
     assert.equal(await page.locator('#xqc-native-panel .xqc-actions button').count(),2);
-    assert.equal(await page.locator('#xqc-native-panel .xqc-footer a').first().evaluate(el=>getComputedStyle(el).width),'22px');
+    assert.equal(await page.locator('#xqc-native-panel .xqc-footer-links a').first().evaluate(el=>getComputedStyle(el).width),'22px');
+    assert.equal(await page.locator('#xqc-native-panel .xqc-version').innerText(),
+      'v'+await page.locator('#xqc-native-panel').getAttribute('data-version'));
+    assert.match((await page.locator('#xqc-native-panel .xqc-footer-note').innerText()).replace(/\s+/g,''),/有更新请到主页重新获取书签/);
     assert.match(await page.locator('#xqc-native-panel .xqc-caption').innerText(),/整页刷新需要重新点击书签，开启侧边栏/);
     await page.setViewportSize({width:1120,height:900});
     assert.equal(await page.locator('#xqc-native-panel>header').evaluate(el=>el.scrollWidth>el.clientWidth),false);
