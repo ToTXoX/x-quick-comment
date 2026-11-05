@@ -1,0 +1,305 @@
+(() => {
+  'use strict';
+  const key = '__xQuickComment';
+  if (window[key]) { window[key](); return; }
+  if (location.origin !== 'https://x.com' || !/^\/(?:notifications|home)(?:\/|$)/.test(location.pathname)) {
+    alert('请在已登录的 X 主页或通知页点击书签。'); return;
+  }
+  // Module IDs verified against the actual logged-in responsive-web bundles.
+  const moduleIds = {react:174394, dom:214659, router:518756, history:533418, location:991975, nativeHistory:194436};
+  const host = document.createElement('section');
+  host.id = 'xqc-native-panel';
+  host.setAttribute('aria-label','𝕏侧栏 · 用户主页');
+  host.dataset.version='2.8';
+  host.innerHTML = '<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">刷新后需重新点击「开启x侧栏」</span></div></div><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div>';
+  const style = document.createElement('style');
+  // X portals live outside this panel; keep native menus/dialogs above it.
+  // Removing this style on cleanup restores the original layering.
+  style.textContent = `#layers{z-index:101!important}#xqc-native-panel{position:fixed;top:0;bottom:0;right:0;width:var(--xqc-width,380px);z-index:100;background:Canvas;color:CanvasText;border-left:1px solid color-mix(in srgb,CanvasText 12%,transparent);box-shadow:-12px 0 48px #00000007;scrollbar-width:thin;scrollbar-color:#88888866 transparent;overflow:auto;overscroll-behavior:contain;color-scheme:light dark}#xqc-native-panel>header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;min-height:38px;gap:12px;position:sticky;top:0;background:Canvas;z-index:5;font:14px system-ui;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent)}#xqc-native-panel>p{margin:20px;padding:18px 20px;border:1px solid color-mix(in srgb,CanvasText 10%,transparent);border-radius:14px;background:color-mix(in srgb,CanvasText 3%,Canvas);white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 system-ui}#xqc-native-panel .xqc-brand{display:flex;align-items:center;gap:11px}#xqc-native-panel .xqc-mark{width:26px;height:26px;display:grid;place-items:center;color:CanvasText}#xqc-native-panel .xqc-brand strong{display:block;font-size:15px;letter-spacing:1px}#xqc-native-panel .xqc-caption{display:block;margin-top:3px;font-size:11px;letter-spacing:.3px;opacity:.55}#xqc-native-panel>header button{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;padding:0;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:50%;background:transparent;color:inherit;font:23px/1 system-ui;cursor:pointer}#xqc-native-panel>header button:hover{background:color-mix(in srgb,CanvasText 7%,Canvas)}#xqc-native-panel>header button:focus-visible{outline:2px solid CanvasText;outline-offset:3px}#xqc-native-panel .xqc-root main{width:100%;max-width:100%;min-width:0}#xqc-native-panel .xqc-root aside,#xqc-native-panel [data-testid="sidebarColumn"]{display:none!important}#xqc-native-panel [data-testid="primaryColumn"]{width:100%!important;min-width:0!important;max-width:100%!important}#xqc-native-panel .xqc-root:has(>div){min-height:50px}`;
+  document.head.append(style); document.body.append(host);
+  // #layers itself can have z-index 101 while its ancestors remain in a
+  // z-index:0 stacking context. A body-level panel still covers that entire
+  // context. Put the panel beside #layers instead of competing with ancestors.
+  let trackedLayerParent;
+  function alignWithNativeLayers() {
+    const layers=document.getElementById('layers');
+    const parent=layers?.parentElement;
+    if(parent && parent!==host && !host.contains(parent)) {
+      if(host.parentElement!==parent) parent.append(host);
+      if(trackedLayerParent===parent) return;
+      trackedLayerParent=parent;
+      layerObserver.disconnect();
+      // Watch container replacement only, not every editor/timeline mutation.
+      for(let node=parent;node;node=node.parentElement) layerObserver.observe(node,{childList:true});
+    } else if(trackedLayerParent) {
+      trackedLayerParent=null;
+      layerObserver.disconnect();
+      layerObserver.observe(document.body,{childList:true,subtree:true});
+    }
+  }
+  const layerObserver=new MutationObserver(alignWithNativeLayers);
+  layerObserver.observe(document.body,{childList:true,subtree:true});
+  alignWithNativeLayers();
+  const status = host.querySelector('[role=status]');
+  const mount = host.querySelector('.xqc-root');
+  let disposed = false, root, secondary, memory, ready, timeout, observer, desiredHandle, nativeError;
+  const report = message => { status.hidden = false; status.textContent = message; };
+  function captureError(error, info) {
+    if (disposed) return;
+    clearTimeout(timeout);
+    nativeError = ['原生组件异常（v2.8）', String(error?.message || error).slice(0,1800),
+      String(error?.stack || '').slice(0,2800), String(info?.componentStack || '').slice(0,2800)]
+      .filter(Boolean).join('\n\n');
+    report(nativeError);
+  }
+  const clean = () => {
+    disposed = true; clearTimeout(timeout);
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('click', onPanelLink);
+    window.removeEventListener('resize', position);
+    layerObserver.disconnect(); observer?.disconnect(); root?.unmount(); memory?.destroy?.(); host.remove(); style.remove(); delete window[key];
+  };
+  window[key] = clean;
+  host.querySelector('button').onclick = clean;
+  function pageElement(selector) {
+    return [...document.querySelectorAll(selector)].find(node =>
+      !host.contains(node) && node.getBoundingClientRect().width > 0);
+  }
+  function notificationColumn() {
+    // A comma selector picks document order, not selector priority. On legacy X,
+    // main contains BOTH primaryColumn and sidebarColumn.
+    return pageElement('[data-testid="primaryColumn"]') || pageElement('main');
+  }
+  let widthWarning = false;
+  function position() {
+    const primary = pageElement('[data-testid="primaryColumn"]');
+    const sidebar = pageElement('[data-testid="sidebarColumn"]') || pageElement('main aside');
+    const edge = primary?.getBoundingClientRect().right ??
+      sidebar?.getBoundingClientRect().left ?? notificationColumn()?.getBoundingClientRect().right;
+    const available = edge == null ? 0 : document.documentElement.clientWidth - edge;
+    if (available < 280) {
+      host.style.width = 'min(380px, 95vw)';
+      widthWarning = true;
+      report('右侧空间不足。请缩小浏览器缩放比例，使通知右侧至少留出 280px。');
+      return false;
+    }
+    host.style.width = `${available}px`;
+    if (widthWarning) { widthWarning = false; report('右侧空间已恢复。请点击用户头像。'); }
+    return true;
+  }
+  window.addEventListener('resize', position); position();
+  function fiberOf(node) {
+    const name = Object.keys(node).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactContainer$'));
+    return name && node[name];
+  }
+  function runtime() {
+    const chunks = window.webpackChunk_twitter_responsive_web;
+    if (!Array.isArray(chunks)) throw Error('没有找到 responsive-web 运行时。当前 X 页面可能切换了版本。');
+    let req;
+    const chunk = [['xqc-'+Date.now()+'-'+Math.random()],{},r=>{req=r;}];
+    chunks.push(chunk);
+    const index = chunks.indexOf(chunk);
+    if (index >= 0) chunks.splice(index,1);
+    if (!req?.m || !Object.values(moduleIds).every(id=>typeof req.m[id]==='function')) {
+      throw Error('X 模块编号发生变化，需要更新适配器。');
+    }
+    const React=req(moduleIds.react), DOM=req(moduleIds.dom), Router=req(moduleIds.router), History=req(moduleIds.history), NativeLocation=req(moduleIds.location).A, NativeHistory=req(moduleIds.nativeHistory).Ay;
+    if (!React.createElement || !DOM.createRoot || !Router.Switch || !Router.Router || !History.createMemoryHistory || !NativeLocation?.createLocation || !NativeLocation.safeParseQuery || !NativeHistory?.push || !NativeHistory?.listen) {
+      throw Error('X 运行时模块形状不匹配，未挂载第二页面。');
+    }
+    return {React, DOM, Router, History, NativeLocation, NativeHistory};
+  }
+  function createNativeMemoryHistory(History, NativeLocation, initialPath) {
+    const history=History.createMemoryHistory({initialEntries:[initialPath]});
+    // Keep all modal metadata local: never borrow the main page's RichHistory.
+    const modalEntries=new Map();
+    let interceptors=[], revision=0;
+    const enrich=()=>{
+      history.location.query=NativeLocation.safeParseQuery(history.location.search);
+      const keys=new Set(history.entries.map(entry=>entry.key));
+      for(const key of modalEntries.keys()) if(!keys.has(key)) modalEntries.delete(key);
+    };
+    enrich();
+    const unlisten=history.listen(enrich);
+    const metadata=location=>{
+      if(!modalEntries.has(location.key)) modalEntries.set(location.key,{});
+      return modalEntries.get(location.key);
+    };
+    history.setModalRoute=(location,isModal)=>{metadata(location).isModal=!!isModal;};
+    history.setModalRouteBreakpoint=location=>{metadata(location).breakpoint=true;};
+    history.getIsModalRoute=()=>!!modalEntries.get(history.location.key)?.isModal;
+    const lastNonModal=respectBreakpoint=>{
+      for(let index=history.index;index>=0;index--) {
+        const meta=modalEntries.get(history.entries[index].key);
+        if((respectBreakpoint && meta?.breakpoint) || !meta?.isModal) return index;
+      }
+      return -1;
+    };
+    for(const [method,asPath] of [['getLastNonModalLocationPath',true],['getLastNonModalLocationPathname',false]]) {
+      history[method]=fallback=>{
+        const index=lastNonModal(false);
+        if(history.index===0 || index<0 || index===history.index) return fallback;
+        const entry=history.entries[index];
+        return asPath?NativeLocation.createPath(entry):entry.pathname;
+      };
+    }
+    history.addInterceptor=interceptor=>{
+      interceptors.push(interceptor);
+      return {remove:()=>{interceptors=interceptors.filter(item=>item!==interceptor);}};
+    };
+    history.getInterceptors=()=>interceptors;
+    history.removeAllInterceptors=()=>{interceptors=[];};
+    for(const method of ['push','replace']) {
+      const original=history[method];
+      history[method]=(path,state)=>{
+        const previous=history.location;
+        const next=NativeLocation.createLocation(path,state);
+        const currentRevision=revision;
+        if(!interceptors.every(item=>item.shouldProceed(next,method.toUpperCase())) || currentRevision!==revision) return;
+        revision++;
+        next.state={...next.state,fromApp:true,previousPath:NativeLocation.createPath(previous),
+          ...(method==='replace'?{isReplace:true}:{})};
+        return original(next);
+      };
+    }
+    history.goBack=(options={})=>{
+      const {backLocation=initialPath,onGoBack,shouldReplaceOnFallback}=options;
+      const navigate=()=>history.index>0?history.go(-1):
+        history[shouldReplaceOnFallback?'replace':'push']({pathname:backLocation,state:{usedFallback:true}});
+      return onGoBack?onGoBack(navigate):navigate();
+    };
+    history.goBackThroughModals=({fallbackPath=initialPath}={})=>{
+      const index=lastNonModal(true);
+      if(history.index===0 || index===history.index) return history.goBack({backLocation:fallbackPath});
+      return index<0?history.push(fallbackPath):history.go(index-history.index);
+    };
+    const originalHref=history.createHref;
+    history.createHref=path=>originalHref(NativeLocation.createLocation(path));
+    history.destroy=()=>{unlisten();modalEntries.clear();interceptors=[];};
+    return history;
+  }
+  function findRoutes(React, Router) {
+    const main=notificationColumn();
+    const leaf=main && fiberOf(main);
+    if (!leaf) throw Error('未找到通知列的 React Fiber（responsive-web）。');
+    const ancestry=[];for(let f=leaf;f;f=f.return) ancestry.push(f);
+    const providers=[];
+    for(const f of ancestry) {
+      const type=f.type, context=type?._context || type;
+      const isProvider=type?.$$typeof===Symbol.for('react.provider') ||
+        (type?.$$typeof===Symbol.for('react.context') && Object.hasOwn(f.memoizedProps||{},'value'));
+      if (isProvider && context!==Router.__RouterContext && context!==Router.__HistoryContext) {
+        providers.push([type,f.memoizedProps.value]);
+      }
+    }
+    const candidates=[], allPaths=new Set();
+    const examine=f=>{
+      if (f.type!==Router.Switch) return;
+      const children=React.Children.toArray(f.memoizedProps?.children);
+      const routes=children.filter(child=>React.isValidElement(child)&&child.props.path);
+      for(const r of routes) for(const p of [].concat(r.props.path)) allPaths.add(String(p));
+      const profile=routes.some(child=>{
+        try {
+          const match=Router.matchPath('/XqcProbeUser',{...child.props,exact:true});
+          return match && Object.values(match.params).includes('XqcProbeUser');
+        } catch {return false;}
+      });
+      if (profile) candidates.push({fiber:f,children,score:ancestry.includes(f)?100:0});
+    };
+    const top=ancestry[ancestry.length-1], current=top?.stateNode?.current || top;
+    const stack=[current]; let count=0;
+    while(stack.length && count++<40000) {
+      const f=stack.pop(); if(!f)continue; examine(f);
+      if(f.sibling)stack.push(f.sibling); if(f.child)stack.push(f.child);
+    }
+    const chosen=candidates.sort((a,b)=>b.score-a.score)[0];
+    if(!chosen) {
+      throw Error('未发现包含主页的原生 Switch。已扫描 '+count+' 个组件；路由：'+
+        ([...allPaths].slice(0,18).join('、')||'无可识别路径'));
+    }
+    return {children:chosen.children,providers};
+  }
+  async function initialize(handle) {
+    const {React, DOM, Router, History, NativeLocation, NativeHistory}=runtime();
+    const {children,providers}=findRoutes(React,Router);
+    if(disposed)return;
+    memory=createNativeMemoryHistory(History,NativeLocation,'/'+handle);
+    // Compose must be owned by AppShell: its header, dismiss flow, and submit
+    // controls depend on the primary route/modal providers. Never mount a second
+    // composer in the copied route tree or copy/call a submit handler ourselves.
+    const isCompose=path=>/^\/(?:compose(?:\/|$)|intent\/(?:post|tweet)(?:\/|$))/.test(path);
+    for(const method of ['push','replace']) {
+      const navigate=memory[method];
+      memory[method]=(path,state)=>{
+        const next=NativeLocation.createLocation(path,state);
+        if(!isCompose(next.pathname)) return navigate(path,state);
+        // Always push in the main router so native dismissal has a return entry.
+        NativeHistory.push(next);
+        // Keep the profile mounted and visible beneath X's modal backdrop.
+        // display:none causes native timeline measurement/virtualization churn.
+        if(!isCompose(NativeHistory.location.pathname)) report('X 尚未打开回复窗口，请处理页面上的提示后重试。');
+      };
+    }
+    secondary={navigate:({to})=>memory.push(to)};
+    let element=React.createElement(Router.Router,{history:memory},
+      React.createElement(Router.Switch,null,children));
+    for(const [type,value] of providers) element=React.createElement(type,{value},element);
+    class Boundary extends React.Component {
+      state={failed:false};
+      static getDerivedStateFromError(){return {failed:true};}
+      componentDidCatch(error,info){captureError(error,info);}
+      render(){return this.state.failed?null:this.props.children;}
+    }
+    observer=new MutationObserver(()=>{
+      if(!nativeError && !status.hidden && mount.querySelector('article,[data-testid="UserName"],[data-testid="UserProfileHeader_Items"]')){
+        status.hidden=true;clearTimeout(timeout);
+      }
+    });
+    observer.observe(mount,{subtree:true,childList:true});
+    // React 19 reports errors caught by nested X boundaries here, even if X
+    // discards the Error object and only renders its generic fallback screen.
+    root=DOM.createRoot(mount,{onCaughtError:captureError,onUncaughtError:captureError});
+    root.render(React.createElement(Boundary,null,element));
+  }
+
+  async function open(handle) {
+    if(nativeError){report(nativeError);return;}
+    if (!position()) return;
+    desiredHandle = handle;
+    report('正在加载 @'+handle+' 的原生主页…');
+    clearTimeout(timeout);
+    timeout = setTimeout(()=>{if(!disposed)report('加载尚未完成。此版本可能缺少 X 内部上下文；可关闭恢复页面。');},45000);
+    try {
+      if (!ready) ready = initialize(handle);
+      await ready; if (disposed) return;
+      if(memory.location.pathname!=='/'+desiredHandle) secondary.navigate({to:'/'+desiredHandle});
+      if (!nativeError && mount.querySelector('article,[data-testid="UserName"]')) {status.hidden = true;clearTimeout(timeout);}
+    } catch(error) { clearTimeout(timeout); report('实验未成功：'+error.message+'\n关闭即可恢复；请把这段提示发给我。'); }
+  }
+  function onClick(event) {
+    if (disposed || !/^\/(?:notifications|home)(?:\/|$)/.test(location.pathname) ||
+        !(event.target instanceof Element) || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const target=event.target, link=target.closest('a[href]');
+    if(host.contains(target)) return;
+    if (!target.closest('main, [data-testid="primaryColumn"]') || !link) return;
+    const avatar='[data-testid^="UserAvatar-Container"],[data-testid="Tweet-User-Avatar"],img[src*="/profile_images/"],img[src*="/default_profile"]';
+    if (!target.closest(avatar) && !link.querySelector(avatar)) return;
+    const url=new URL(link.href), handle=url.pathname.match(/^\/([a-z0-9_]{1,15})\/?$/i)?.[1];
+    if (url.origin!==location.origin || !handle) return;
+    event.preventDefault();event.stopImmediatePropagation(); void open(handle);
+  }
+  function onPanelLink(event) {
+    // Bubble after React: Link handlers preserve location.state and cancel the
+    // default. Only plain anchors still need a memory-history fallback.
+    if(disposed || event.defaultPrevented || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !(event.target instanceof Element)) return;
+    const link=event.target.closest('a[href]');
+    if(!link || !host.contains(link) || !memory || link.hasAttribute('download') || (link.target && link.target!=='_self')) return;
+    const url=new URL(link.href);
+    if(url.origin!==location.origin) return;
+    event.preventDefault();
+    memory.push(url.pathname+url.search+url.hash);
+  }
+  document.addEventListener('click', onPanelLink);
+  document.addEventListener('click', onClick, true);
+  if (!widthWarning) report('点击左侧头像，查看用户主页。');
+})();
