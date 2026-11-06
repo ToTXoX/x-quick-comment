@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const dir = process.env.XQC_TEST_ASSETS || path.join(process.env.TEMP, 'xqc-local-test');
+const bundle = process.env.XQC_TEST_BUNDLE === 'current' ? 'x-current' : 'x-live';
 const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:path.join(dir,'chrome-testing-157.0.8103.38/chrome-win64/chrome.exe')});
@@ -33,7 +34,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         return Array.prototype.push.call(chunks,chunk);
       };window.webpackChunk_twitter_responsive_web=chunks;
     });
-    for(const file of ['x-live-vendor.js','x-live-main.js'])await page.addScriptTag({content:fs.readFileSync(path.join(dir,file),'utf8')});
+    for(const file of [`${bundle}-vendor.js`,`${bundle}-main.js`])await page.addScriptTag({content:fs.readFileSync(path.join(dir,file),'utf8')});
     await page.evaluate(()=>{
       const R=fixtureRequire(174394),DOM=fixtureRequire(214659),RR=fixtureRequire(518756),H=fixtureRequire(533418);
       const C=R.createContext('missing'),StoreContext=R.createContext(null);let mounts=0;
@@ -127,7 +128,16 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       nativeHistory.setModalRoute=()=>{};
       nativeHistory.setModalRouteBreakpoint=()=>{};
       nativeHistory.goBackThroughModals=()=>nativeHistory.goBack();
-      fixtureRequire.m[194436]=(module)=>{module.exports={Ay:nativeHistory};};
+      const richHistoryId=Object.keys(fixtureRequire.m).find(id=>{
+        const source=String(fixtureRequire.m[id]);
+        return ['RichHistory','goBackThroughModals','initialRwebLocationKey'].every(marker=>source.includes(marker));
+      });
+      if(!richHistoryId)throw Error('Fixture could not find X native history');
+      fixtureRequire.m[richHistoryId]=(module)=>{
+        // Keep the real module's signature while substituting fixture history:
+        // RichHistory goBackThroughModals initialRwebLocationKey
+        module.exports={Ay:nativeHistory};
+      };
       const modalHost=document.createElement('div');modalHost.id='native-modal';document.body.append(modalHost);
       const modalRoot=DOM.createRoot(modalHost);
       nativeHistory.listen(location=>{
@@ -267,7 +277,28 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       await page.locator('#xqc-native-panel article h2').filter({hasText:'bob shared-context'}).waitFor();
       await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
     }
+    // Simulate a new X deployment that renumbers every module. Internal
+    // dependencies still use the original fixture ids; the public runtime
+    // surface exposed to the bookmarklet uses only the new ids.
+    await page.evaluate(()=>{
+      const chunks=window.webpackChunk_twitter_responsive_web;
+      const modules=fixtureRequire.m;
+      const offset=1000000;
+      const shifted=id=>fixtureRequire(Number(id)-offset);
+      shifted.m=Object.fromEntries(Object.entries(modules).map(([id,factory])=>[Number(id)+offset,factory]));
+      chunks.push=chunk=>{
+        Object.assign(modules,chunk[1]);
+        if(String(chunk[0][0]).startsWith('xqc-'))chunk[2](shifted);
+        return Array.prototype.push.call(chunks,chunk);
+      };
+      window.history.replaceState({},'','/notifications');
+      fixtureMainHistory.push('/notifications');
+    });
+    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    await page.locator('#app [data-testid="UserAvatar-Container-alice"]').click();
+    await page.getByRole('heading',{name:'alice shared-context'}).waitFor();
+    await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
     assert.deepEqual(errors,[]);
-    console.log('PASS: home, profile and status activation; native routing and composer; nested errors; stalled timeline retry and fallback. Native X profile still requires live validation.');
+    console.log('PASS: renumbered modules; home, profile and status activation; native routing and composer; nested errors; stalled timeline retry and fallback. Native X profile still requires live validation.');
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
