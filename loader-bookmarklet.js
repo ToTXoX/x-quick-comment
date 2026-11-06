@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   if (location.origin !== 'https://x.com') {
-    alert('请在已登录的 X 页面点击「开启x侧栏」。');
+    alert('请打开 X 页面后，再点击书签开启侧边栏');
     return;
   }
   if (window.__xQuickComment) { window.__xQuickComment(); return; }

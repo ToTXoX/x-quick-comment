@@ -9,7 +9,7 @@
     return !!match && !reservedPaths.has(match[1].toLowerCase());
   }
   if (location.origin !== 'https://x.com' || !supportedPage()) {
-    alert('请在已登录的 X 主页、通知页、用户主页或帖子页点击书签。'); return;
+    alert('请打开 X 页面后，再点击书签开启侧边栏'); return;
   }
   const host = document.createElement('section');
   host.id = 'xqc-native-panel';
