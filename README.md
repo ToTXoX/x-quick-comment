@@ -23,6 +23,8 @@
 
 运行 `node test-dynamic-loader.cjs` 可测试动态加载与 X 的内容安全策略；运行 `node test-native-adapter.cjs` 可测试原生路由适配。测试需要本地 Chromium 与 X bundle 测试资源（默认 `%TEMP%/xqc-local-test`）。由于 X 的内部页面结构可能变化，真实页面仍需安装后验证。
 
+导航配置隔离测试还使用该目录中的 `x-app-modules.js`，来自当前登录页面的 `loader.AppModules.76aa056a34182eb8a.js`，以 X 的真实配置队列验证侧栏预填文字不会进入主页面发帖入口。
+
 ## 许可
 
 本项目采用 [MIT 许可证](LICENSE)。

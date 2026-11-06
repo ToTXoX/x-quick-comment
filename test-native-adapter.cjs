@@ -34,10 +34,33 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         return Array.prototype.push.call(chunks,chunk);
       };window.webpackChunk_twitter_responsive_web=chunks;
     });
-    for(const file of [`${bundle}-vendor.js`,`${bundle}-main.js`])await page.addScriptTag({content:fs.readFileSync(path.join(dir,file),'utf8')});
+    for(const file of [`${bundle}-vendor.js`,`${bundle}-main.js`,'x-app-modules.js'])await page.addScriptTag({content:fs.readFileSync(path.join(dir,file),'utf8')});
     await page.evaluate(()=>{
       const R=fixtureRequire(174394),DOM=fixtureRequire(214659),RR=fixtureRequire(518756),H=fixtureRequire(533418);
       const C=R.createContext('missing'),StoreContext=R.createContext(null);let mounts=0;
+      // Use X's real module-level configuration queue. Main route remounts must
+      // never promote the sidebar's profile configuration to the native nav.
+      const configureId=Object.keys(fixtureRequire.m).find(id=>String(fixtureRequire.m[id]).includes('Only one Configuration for this component can be mounted at a time'));
+      // This module only reports duplicate-registration diagnostics to X.
+      fixtureRequire.m[212400]=module=>{module.exports={default:()=>{window.fixtureConfigWarnings=(window.fixtureConfigWarnings||0)+1;}};};
+      const makeConfigured=fixtureRequire(configureId).A;
+      const Navigation=makeConfigured(({composeOptions})=>R.createElement('button',{id:'main-post',onClick:()=>window.fixtureNativeHistory.push({pathname:'/compose/post',state:composeOptions})},'New post'));
+      const originalConfigure=Navigation.Configure;
+      // X's header wraps its memo Configure in a modal-aware function.
+      Navigation.Configure=props=>R.createElement(originalConfigure,props);
+      window.fixtureNavigation=Navigation;
+      window.fixtureOriginalConfigure=Navigation.Configure;
+      fixtureRequire.m[999999]=module=>{
+        // _renderSideNav sideNavWrapper configMounted Configure
+        module.exports={default:Navigation};
+      };
+      function MainConfig(){
+        const [epoch,setEpoch]=R.useState(0);
+        window.fixtureRemountConfig=()=>setEpoch(v=>v+1);
+        return R.createElement(Navigation.Configure,{key:epoch,composeOptions:window.fixtureMainComposeOptions||{}});
+      }
+      const navHost=document.createElement('div');document.body.append(navHost);
+      DOM.createRoot(navHost).render(R.createElement(R.Fragment,null,R.createElement(MainConfig),R.createElement(Navigation)));
       const storeState={entities:{tweets:{entities:{'123456789':{favorited:false}}}}},listeners=new Set();
       const fakeStore={getState:()=>storeState,subscribe:fn=>{listeners.add(fn);return ()=>listeners.delete(fn);},
         setFavorited:value=>{storeState.entities.tweets.entities['123456789'].favorited=value;for(const fn of listeners)fn();}};
@@ -83,6 +106,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         if(params.screenName==='hanging')return R.createElement(HangingProfile);
         if(params.screenName==='slow')return R.createElement(SlowProfile);
         return R.createElement('article',null,
+          R.createElement(Navigation.Configure,{composeOptions:{defaultText:'@'+params.screenName+' '}},R.createElement('span',{id:'configuration-child'},'Profile content')),
           R.createElement('h2',null,params.screenName+' '+value),
           R.createElement('output',{id:'context-route'},contextHistory?.location.pathname),
           R.createElement('div',{'data-testid':'UserName'},'@reposted-author'),
@@ -135,7 +159,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         }
         componentWillUnmount(){this.props.history.setModalRouteBreakpoint(this.props.history.location);}
         render(){return R.createElement('div',null,
-          R.createElement('label',null,'Reply text',R.createElement('textarea',{id:'reply'})),
+          R.createElement('label',null,'Reply text',R.createElement('textarea',{id:'reply',defaultValue:this.props.location.state?.defaultText||''})),
           R.createElement('button',{id:'close-compose',onClick:()=>this.props.history.goBackThroughModals()},'Close reply'));}
       }
       const Compose=RR.withRouter(ComposeScreen);
@@ -266,7 +290,23 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.locator('#close-compose').click();
     await page.getByRole('heading',{name:'bob shared-context'}).waitFor();
     assert.equal(await page.evaluate(()=>window.fixtureReposts||0),0);
+    // Recreate the native page configuration after several sidebar replies.
+    // Without isolation, the still-mounted @bob config becomes first in X's
+    // queue and contaminates the otherwise ordinary native Post button.
+    await page.evaluate(()=>fixtureRemountConfig());
+    await page.locator('#main-post').click();
+    await page.locator('#reply').waitFor();
+    assert.equal(await page.locator('#reply').inputValue(),'');
+    await page.locator('#close-compose').click();
+    assert.equal(await page.locator('#configuration-child').innerText(),'Profile content');
+    // Genuine main-page prefills are preserved, including intentional mentions.
+    await page.evaluate(()=>{window.fixtureMainComposeOptions={defaultText:'@intentional saved text'};fixtureRemountConfig();});
+    await page.locator('#main-post').click();
+    await page.locator('#reply').waitFor();
+    assert.equal(await page.locator('#reply').inputValue(),'@intentional saved text');
+    await page.locator('#close-compose').click();
     await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+    assert.equal(await page.evaluate(()=>fixtureNavigation.Configure===fixtureOriginalConfigure),true);
     assert.equal(await page.locator('#xqc-native-panel').count(),0);
     assert.equal(await page.locator('#layers').evaluate(el=>getComputedStyle(el).zIndex),'3');
     await page.locator('#increment').click();
