@@ -14,7 +14,7 @@
   const host = document.createElement('section');
   host.id = 'xqc-native-panel';
   host.setAttribute('aria-label','𝕏侧栏 · 用户主页');
-  const version = '3.12';
+  const version = '3.13';
   host.dataset.version=version;
   host.innerHTML = `<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">整页刷新需要重新点击书签，开启侧边栏</span></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></div></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 动态书签自动获取更新</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
   const style = document.createElement('style');
@@ -189,6 +189,7 @@
       dom:['react.dev/errors/','createRoot','hydrateRoot'],
       router:['MemoryRouter','Switch','Router-History'],
       history:['createMemoryHistory','createBrowserHistory','createHashHistory'],
+      redux:['react-redux-context','notifyNestedSubs','getServerState'],
       location:['safeParseQuery','URIError','URLSearchParams'],
       nativeHistory:['RichHistory','goBackThroughModals','initialRwebLocationKey'],
       navigationConfig:['_renderSideNav','sideNavWrapper','configMounted','Configure']
@@ -210,7 +211,14 @@
     }
     const Navigation=req(found.navigationConfig[0]).default;
     if(typeof Navigation?.Configure!=='function') throw Error('无法隔离 X 导航配置，未挂载侧栏。');
-    return {React, DOM, Router, History, NativeLocation, NativeHistory, Navigation};
+    // Resolve the real Provider by behavior, not its minified export name.
+    const storeProviders=Object.values(req(found.redux[0])).filter(value=>{
+      if(typeof value!=='function') return false;
+      const source=Function.prototype.toString.call(value);
+      return ['getServerState','notifyNestedSubs','tryUnsubscribe','children'].every(marker=>source.includes(marker));
+    });
+    if(storeProviders.length!==1) throw Error('无法定位 X 状态 Provider，未挂载侧栏。');
+    return {React, DOM, Router, History, NativeLocation, NativeHistory, Navigation, StoreProvider:storeProviders[0]};
   }
   function isolateNavigationConfig(React, Navigation) {
     if (restoreNavigationConfig) return;
@@ -342,7 +350,7 @@
     return {children:chosen.children,providers};
   }
   async function initialize(handle) {
-    const {React, DOM, Router, History, NativeLocation, NativeHistory, Navigation}=runtime();
+    const {React, DOM, Router, History, NativeLocation, NativeHistory, Navigation, StoreProvider}=runtime();
     const {children,providers}=findRoutes(React,Router);
     if(disposed)return;
     isolateNavigationConfig(React,Navigation);
@@ -371,7 +379,19 @@
     secondary={navigate:({to})=>memory.push(to)};
     let element=React.createElement(Router.Router,{history:memory},
       React.createElement(Router.Switch,null,children));
+    const storeContexts=new Set();
     for(const [type,value] of providers) {
+      if(value?.store && typeof value.subscription?.addNestedSub==='function') {
+        const context=type._context || type;
+        if(storeContexts.has(context)) continue;
+        storeContexts.add(context);
+        // A copied connect() subscription stops notifying when its main-page
+        // owner unmounts. Subscribe directly through X's own Redux Provider;
+        // keep the same store, but own this root's subscription and cleanup.
+        element=React.createElement(StoreProvider,{store:value.store,context,
+          stabilityCheck:value.stabilityCheck,noopCheck:value.noopCheck},element);
+        continue;
+      }
       // X's app context also carries the main page history. The copied profile
       // must see the same sidebar history as React Router.
       const scopedValue=value?.history===NativeHistory?{...value,history:memory}:value;

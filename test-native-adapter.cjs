@@ -37,6 +37,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     for(const file of [`${bundle}-vendor.js`,`${bundle}-main.js`,'x-app-modules.js'])await page.addScriptTag({content:fs.readFileSync(path.join(dir,file),'utf8')});
     await page.evaluate(()=>{
       const R=fixtureRequire(174394),DOM=fixtureRequire(214659),RR=fixtureRequire(518756),H=fixtureRequire(533418);
+      const Redux=fixtureRequire(777407);
       const C=R.createContext('missing'),StoreContext=R.createContext(null);let mounts=0;
       // Use X's real module-level configuration queue. Main route remounts must
       // never promote the sidebar's profile configuration to the native nav.
@@ -61,13 +62,36 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       }
       const navHost=document.createElement('div');document.body.append(navHost);
       DOM.createRoot(navHost).render(R.createElement(R.Fragment,null,R.createElement(MainConfig),R.createElement(Navigation)));
-      const storeState={entities:{tweets:{entities:{'123456789':{favorited:false}}}}},listeners=new Set();
+      let storeState={timelineRevision:0,entities:{tweets:{entities:{'123456789':{favorited:false}}}}};
+      const listeners=new Set();
       const fakeStore={getState:()=>storeState,subscribe:fn=>{listeners.add(fn);return ()=>listeners.delete(fn);},
+        dispatch:action=>{storeState={...storeState,timelineRevision:action.revision};for(const fn of [...listeners])fn();return action;},
+        subscriberCount:()=>listeners.size,
         setFavorited:value=>{storeState.entities.tweets.entities['123456789'].favorited=value;for(const fn of listeners)fn();}};
       window.fixtureTweetStore=fakeStore;
-      function Notifications(){const [count,set]=R.useState(0);R.useEffect(()=>{mounts++;window.notificationMounts=mounts;},[]);return R.createElement('main',null,R.createElement('section',{'data-testid':'primaryColumn'},
+      function NotificationsContent(){const [count,set]=R.useState(0);R.useEffect(()=>{mounts++;window.notificationMounts=mounts;},[]);return R.createElement('main',null,R.createElement('section',{'data-testid':'primaryColumn'},
         R.createElement('button',{id:'increment',onClick:()=>set(count+1)},'count '+count),
-        ...['alice','bob','broken','hanging','slow'].map(name=>R.createElement('a',{href:'/'+name,key:name},R.createElement('span',{'data-testid':'UserAvatar-Container-'+name},name)))));}
+        R.createElement('output',{id:'main-store-state'},Redux.d4(state=>state.timelineRevision)),
+        ...['alice','bob','broken','hanging','slow','updates'].map(name=>R.createElement('a',{href:'/'+name,key:name},R.createElement('span',{'data-testid':'UserAvatar-Container-'+name},name)))));}
+      // Real connect() inserts a nested subscription into the context copied
+      // by the sidebar. Unmounting its owner must not strand the sidebar.
+      const ConnectedNotifications=Redux.Ng(()=>({}))(NotificationsContent);
+      function Notifications(){
+        const [epoch,setEpoch]=R.useState(0);
+        window.fixtureRemountNotifications=()=>setEpoch(value=>value+1);
+        return R.createElement(ConnectedNotifications,{key:epoch});
+      }
+      const ConnectedRevision=Redux.Ng(state=>({revision:state.timelineRevision}))(
+        ({revision})=>R.createElement('output',{id:'connected-state'},revision));
+      function StoreProfile(){
+        const revision=Redux.d4(state=>state.timelineRevision);
+        R.useEffect(()=>{window.storeProfileMounts=(window.storeProfileMounts||0)+1;},[]);
+        return R.createElement('article',null,
+          R.createElement('h2',null,'Profile header loaded'),
+          R.createElement('output',{id:'hook-state'},revision),R.createElement(ConnectedRevision),
+          revision?R.createElement('div',{'data-testid':'tweet'},'Loaded post '+revision):
+            R.createElement('div',{role:'progressbar'},'Timeline waiting'));
+      }
       class SilentBoundary extends R.Component {
         state={failed:false};
         static getDerivedStateFromError(){return {failed:true};}
@@ -105,6 +129,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         if(params.screenName==='broken')return R.createElement(SilentBoundary,null,R.createElement(BrokenProfile));
         if(params.screenName==='hanging')return R.createElement(HangingProfile);
         if(params.screenName==='slow')return R.createElement(SlowProfile);
+        if(params.screenName==='updates')return R.createElement(StoreProfile);
         return R.createElement('article',null,
           R.createElement(Navigation.Configure,{composeOptions:{defaultText:'@'+params.screenName+' '}},R.createElement('span',{id:'configuration-child'},'Profile content')),
           R.createElement('h2',null,params.screenName+' '+value),
@@ -193,7 +218,8 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         R.createElement(RR.Route,{path:'/compose/post',component:Compose}),
         R.createElement(RR.Route,{path:'/:screenName/status/:id',exact:true,component:StatusPage}),
         R.createElement(RR.Route,{path:'/:screenName',exact:true,component:ProfilePage}))));
-      DOM.createRoot(document.querySelector('#app')).render(R.createElement(StoreContext.Provider,{value:{store:fakeStore,history:nativeHistory}},appTree));
+      DOM.createRoot(document.querySelector('#app')).render(R.createElement(Redux.Kq,{store:fakeStore},
+        R.createElement(StoreContext.Provider,{value:{store:fakeStore,history:nativeHistory}},appTree)));
     });
     await page.locator('#increment').click();
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
@@ -311,6 +337,30 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await page.locator('#layers').evaluate(el=>getComputedStyle(el).zIndex),'3');
     await page.locator('#increment').click();
     assert.equal(await page.locator('#increment').innerText(),'count 3');
+    // Freeze the sidebar's 3-second recovery so a rebuild cannot mask a lost
+    // subscription. Both useSelector() and connect() must see completed data.
+    await page.clock.install();
+    const baselineSubscribers=await page.evaluate(()=>fixtureTweetStore.subscriberCount());
+    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    await page.locator('#app [data-testid="UserAvatar-Container-updates"]').click();
+    await page.locator('#xqc-native-panel [role=progressbar]').waitFor();
+    for(const revision of [1,2]) {
+      const beforeMounts=await page.evaluate(()=>notificationMounts);
+      await page.evaluate(()=>fixtureRemountNotifications());
+      await page.waitForFunction(before=>notificationMounts>before,beforeMounts);
+      await page.evaluate(revision=>fixtureTweetStore.dispatch({revision}),revision);
+      await page.waitForFunction(revision=>
+        document.querySelector('#xqc-native-panel #hook-state')?.textContent===String(revision) &&
+        document.querySelector('#xqc-native-panel #connected-state')?.textContent===String(revision),revision,{timeout:2000});
+      assert.equal(await page.locator('#main-store-state').innerText(),String(revision));
+      assert.equal(await page.locator('#xqc-native-panel [role=progressbar]').count(),0);
+      assert.equal(await page.locator('#xqc-native-panel [data-testid=tweet]').innerText(),'Loaded post '+revision);
+      assert.equal(await page.evaluate(()=>storeProfileMounts),1);
+    }
+    await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+    assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),baselineSubscribers);
+    await page.evaluate(()=>fixtureTweetStore.dispatch({revision:3}));
+    await page.waitForFunction(()=>document.querySelector('#main-store-state')?.textContent==='3');
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
     await page.locator('#app [data-testid="UserAvatar-Container-broken"]').click();
     const diagnostic=page.locator('#xqc-native-panel>[role=status]');
@@ -321,7 +371,6 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.match(await diagnostic.innerText(),/fixture: missing native profile context/);
     await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
     assert.deepEqual(errors,[]);
-    await page.clock.install();
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
     await page.locator('#app [data-testid="UserAvatar-Container-slow"]').click();
     await page.locator('#xqc-native-panel [role=progressbar]').waitFor({state:'attached'});
@@ -375,6 +424,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.getByRole('heading',{name:'alice shared-context'}).waitFor();
     await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
     assert.deepEqual(errors,[]);
-    console.log('PASS: renumbered modules; home, profile and status activation; native routing and composer; nested errors; stalled timeline retry and fallback. Native X profile still requires live validation.');
+    assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),baselineSubscribers);
+    console.log('PASS: independent subscriptions across main-page remounts and cleanup; renumbered modules; home, profile and status activation; native routing and composer; nested errors; stalled timeline retry and fallback. Native X profile still requires live validation.');
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
