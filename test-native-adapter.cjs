@@ -116,7 +116,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         const [loaded,setLoaded]=R.useState(false);
         R.useEffect(()=>{
           window.slowMounts=(window.slowMounts||0)+1;
-          const timer=setTimeout(()=>setLoaded(true),3000);
+          const timer=setTimeout(()=>setLoaded(true),6000);
           return ()=>clearTimeout(timer);
         },[]);
         return loaded?R.createElement('article',null,
@@ -281,7 +281,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
     await page.locator('#app [data-testid="UserAvatar-Container-slow"]').click();
     await page.locator('#xqc-native-panel [role=progressbar]').waitFor({state:'attached'});
-    await page.clock.fastForward(3000);
+    await page.clock.fastForward(6000);
     await page.getByRole('heading',{name:'slow shared-context'}).waitFor();
     assert.equal(await page.evaluate(()=>window.slowMounts),1);
     assert.equal(await page.locator('#xqc-native-panel>[role=status]').isHidden(),true);
@@ -289,6 +289,10 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
     await page.locator('#app [data-testid="UserAvatar-Container-hanging"]').click();
     await page.locator('#xqc-native-panel [role=progressbar]').waitFor({state:'attached'});
+    await page.clock.fastForward(2000);
+    await page.locator('#app [data-testid="UserAvatar-Container-hanging"]').click();
+    await page.clock.fastForward(1000);
+    assert.equal(await page.evaluate(()=>window.hangingMounts),1);
     await page.clock.fastForward(4000);
     await page.waitForFunction(()=>window.hangingMounts===2);
     await page.clock.fastForward(4000);

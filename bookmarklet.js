@@ -14,7 +14,7 @@
   const host = document.createElement('section');
   host.id = 'xqc-native-panel';
   host.setAttribute('aria-label','𝕏侧栏 · 用户主页');
-  const version = '3.9';
+  const version = '3.10';
   host.dataset.version=version;
   host.innerHTML = `<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">整页刷新需要重新点击书签，开启侧边栏</span></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></div></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 动态书签自动获取更新</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
   const style = document.createElement('style');
@@ -48,10 +48,10 @@
   const status = host.querySelector('[role=status]');
   const mount = host.querySelector('.xqc-root');
   let disposed = false, root, secondary, memory, ready, timeout, observer, desiredHandle, nativeError;
-  let loadedHandle, baselineTweet, baselineText;
+  let loadedHandle, pendingHandle, failedHandle, baselineTweet, baselineText;
   let tweetStore, unlistenTweets, likeFrame = 0;
   let loadSerial = 0;
-  const firstRetryMs = 4000, finalWaitMs = 4000;
+  const layoutRetryMs = 3000, hardRetryMs = 7000, finalWaitMs = 4000;
   const report = message => { status.hidden = false; status.textContent = message; };
   const hasPosts = () => {
     const tweet=mount.querySelector('[data-testid="tweet"]');
@@ -62,6 +62,7 @@
   function finishLoading(handle, serial) {
     if (disposed || nativeError || serial!==loadSerial || handle!==desiredHandle) return;
     loadedHandle=handle;
+    pendingHandle=failedHandle=undefined;
     status.hidden=true;
     host.classList.remove('xqc-stalled');
     clearTimeout(timeout);
@@ -84,6 +85,7 @@
     likeFrame=requestAnimationFrame(()=>{likeFrame=0;syncLikeState();});
   }
   function showStalled(handle) {
+    pendingHandle=undefined;
     host.classList.add('xqc-stalled');
     report('帖子暂未加载出来。');
     const retry = document.createElement('button');
@@ -96,12 +98,22 @@
   }
   function watchPosts(handle, serial, retried) {
     clearTimeout(timeout);
-    timeout = setTimeout(() => {
+    const stillWaiting=()=>!disposed && !nativeError && serial===loadSerial;
+    const check=()=>{
       if (disposed || nativeError || serial !== loadSerial) return;
       if (hasPosts()) { finishLoading(handle,serial); return; }
       if (retried) showStalled(handle);
       else void restart(handle);
-    }, retried ? finalWaitMs : firstRetryMs);
+    };
+    if (retried) { timeout=setTimeout(check,finalWaitMs); return; }
+    timeout=setTimeout(()=>{
+      if (!stillWaiting()) return;
+      if (hasPosts()) { finishLoading(handle,serial); return; }
+      // Let an in-flight X request finish. A resize nudges its virtualized
+      // timeline to measure the side panel without unmounting the profile.
+      window.dispatchEvent(new Event('resize'));
+      timeout=setTimeout(check,hardRetryMs-layoutRetryMs);
+    },layoutRetryMs);
   }
   async function restart(handle) {
     if (disposed || handle !== desiredHandle) return;
@@ -111,12 +123,13 @@
     likeFrame=0; tweetStore=unlistenTweets=undefined;
     root?.unmount(); memory?.destroy?.();
     root = secondary = memory = observer = ready = undefined;
-    loadedHandle=baselineTweet=baselineText=undefined;
+    loadedHandle=pendingHandle=failedHandle=baselineTweet=baselineText=undefined;
     await open(handle, true);
   }
   function captureError(error, info) {
     if (disposed) return;
     clearTimeout(timeout);
+    pendingHandle=undefined;
     nativeError = ['原生组件异常（v'+version+'）', String(error?.message || error).slice(0,1800),
       String(error?.stack || '').slice(0,2800), String(info?.componentStack || '').slice(0,2800)]
       .filter(Boolean).join('\n\n');
@@ -364,6 +377,10 @@
   async function open(handle, retried = false) {
     if(nativeError){report(nativeError);return;}
     if (!position()) return;
+    if (!retried && pendingHandle===handle) return;
+    if (!retried && desiredHandle===handle && (host.classList.contains('xqc-stalled') || failedHandle===handle)) {
+      return restart(handle);
+    }
     if (!retried && loadedHandle===handle && memory?.location.pathname==='/'+handle && mount.querySelector('[data-testid="tweet"]')) {
       status.hidden=true;
       return;
@@ -371,6 +388,8 @@
     baselineTweet=mount.querySelector('[data-testid="tweet"]');
     baselineText=baselineTweet?.textContent;
     loadedHandle=undefined;
+    pendingHandle=handle;
+    failedHandle=undefined;
     host.classList.remove('xqc-stalled');
     desiredHandle = handle;
     const serial = ++loadSerial;
@@ -378,10 +397,15 @@
     watchPosts(handle, serial, retried);
     try {
       if (!ready) ready = initialize(handle);
-      await ready; if (disposed) return;
+      await ready; if (disposed || serial!==loadSerial) return;
       if(memory.location.pathname!=='/'+desiredHandle) secondary.navigate({to:'/'+desiredHandle});
       if(hasPosts()) finishLoading(handle,serial);
-    } catch(error) { clearTimeout(timeout); report('实验未成功：'+error.message+'\n关闭即可恢复；请把这段提示发给我。'); }
+    } catch(error) {
+      if (disposed || serial!==loadSerial) return;
+      clearTimeout(timeout);
+      pendingHandle=undefined; failedHandle=handle;
+      report('实验未成功：'+error.message+'\n关闭即可恢复；请把这段提示发给我。');
+    }
   }
   function onClick(event) {
     if (disposed || !supportedPage() ||
