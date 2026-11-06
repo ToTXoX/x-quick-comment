@@ -14,13 +14,13 @@
   const host = document.createElement('section');
   host.id = 'xqc-native-panel';
   host.setAttribute('aria-label','𝕏侧栏 · 用户主页');
-  const version = '3.6';
+  const version = '3.7';
   host.dataset.version=version;
   host.innerHTML = `<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">整页刷新需要重新点击书签，开启侧边栏</span></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></div></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 动态书签自动获取更新</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
   const style = document.createElement('style');
   // X portals live outside this panel; keep native menus/dialogs above it.
   // Removing this style on cleanup restores the original layering.
-  style.textContent = `#layers{z-index:101!important}#xqc-native-panel{position:fixed;top:0;bottom:0;right:0;width:var(--xqc-width,380px);z-index:100;background:Canvas;color:CanvasText;border-left:1px solid color-mix(in srgb,CanvasText 12%,transparent);box-shadow:-12px 0 48px #00000007;scrollbar-width:thin;scrollbar-color:#88888866 transparent;overflow:auto;overscroll-behavior:contain;color-scheme:light dark;padding-bottom:48px}#xqc-native-panel>header{display:flex;justify-content:space-between;align-items:center;padding:24px 20px 12px;min-height:38px;gap:12px;position:sticky;top:0;background:Canvas;z-index:5;font:14px system-ui;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent)}#xqc-native-panel>p{margin:20px;padding:18px 20px;border:1px solid color-mix(in srgb,CanvasText 10%,transparent);border-radius:14px;background:color-mix(in srgb,CanvasText 3%,Canvas);white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 system-ui}#xqc-native-panel>p button{margin-top:10px;padding:4px 10px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;cursor:pointer}#xqc-native-panel>p a{color:inherit}#xqc-native-panel .xqc-brand{display:flex;align-items:center;gap:11px}#xqc-native-panel .xqc-mark{width:26px;height:26px;display:grid;place-items:center;color:CanvasText}#xqc-native-panel .xqc-brand strong{display:block;font-size:15px;letter-spacing:1px}#xqc-native-panel .xqc-actions{display:flex;flex-shrink:0;gap:6px}#xqc-native-panel .xqc-caption{display:block;margin-top:3px;font-size:11px;letter-spacing:.3px;opacity:.55}#xqc-native-panel .xqc-actions button{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;padding:0;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:50%;background:transparent;color:inherit;font:23px/1 system-ui;cursor:pointer}#xqc-native-panel .xqc-actions button:hover{background:color-mix(in srgb,CanvasText 7%,Canvas)}#xqc-native-panel .xqc-actions button:focus-visible{outline:2px solid CanvasText;outline-offset:3px}#xqc-native-panel .xqc-footer{position:fixed;right:0;bottom:0;width:inherit;height:48px;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;border-top:1px solid color-mix(in srgb,CanvasText 10%,transparent);background:Canvas;color:CanvasText;font:10px system-ui}#xqc-native-panel .xqc-footer-note{display:flex;align-items:center;gap:3px;height:18px;white-space:nowrap;opacity:.72}#xqc-native-panel .xqc-footer-note .xqc-version{font-weight:600}#xqc-native-panel .xqc-footer-links{display:flex;align-items:center;justify-content:center;gap:10px;height:24px}#xqc-native-panel .xqc-footer a{display:grid;place-items:center;width:22px;height:22px;color:inherit;text-decoration:none;opacity:.65}#xqc-native-panel .xqc-footer-note a{display:inline;width:auto;height:auto;color:inherit;text-decoration:underline;opacity:1}#xqc-native-panel .xqc-footer a:hover{opacity:1}#xqc-native-panel .xqc-footer a:focus-visible{outline:2px solid CanvasText;outline-offset:1px}#xqc-native-panel .xqc-footer svg{width:14px;height:14px}#xqc-native-panel .xqc-footer a span{font:16px/1 system-ui}#xqc-native-panel [data-testid="like"].xqc-liked-from-store,#xqc-native-panel [data-testid="like"].xqc-liked-from-store svg{color:rgb(249,24,128)!important}#xqc-native-panel .xqc-root main{width:100%;max-width:100%;min-width:0}#xqc-native-panel .xqc-root aside,#xqc-native-panel [data-testid="sidebarColumn"]{display:none!important}#xqc-native-panel [data-testid="primaryColumn"]{width:100%!important;min-width:0!important;max-width:100%!important}#xqc-native-panel .xqc-root:has(>div){min-height:50px}`;
+  style.textContent = `#layers{z-index:101!important}#xqc-native-panel{position:fixed;top:0;bottom:0;right:0;width:var(--xqc-width,380px);z-index:100;background:Canvas;color:CanvasText;border-left:1px solid color-mix(in srgb,CanvasText 12%,transparent);box-shadow:-12px 0 48px #00000007;scrollbar-width:thin;scrollbar-color:#88888866 transparent;overflow:auto;overscroll-behavior:contain;color-scheme:light dark;padding-bottom:48px}#xqc-native-panel>header{display:flex;justify-content:space-between;align-items:center;padding:24px 20px 12px;min-height:38px;gap:12px;position:sticky;top:0;background:Canvas;z-index:5;font:14px system-ui;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent)}#xqc-native-panel>p{margin:20px;padding:18px 20px;border:1px solid color-mix(in srgb,CanvasText 10%,transparent);border-radius:14px;background:color-mix(in srgb,CanvasText 3%,Canvas);white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 system-ui}#xqc-native-panel>p button{margin-top:10px;padding:4px 10px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;cursor:pointer}#xqc-native-panel>p a{color:inherit}#xqc-native-panel .xqc-brand{display:flex;align-items:center;gap:11px}#xqc-native-panel .xqc-mark{width:26px;height:26px;display:grid;place-items:center;color:CanvasText}#xqc-native-panel .xqc-brand strong{display:block;font-size:15px;letter-spacing:1px}#xqc-native-panel .xqc-actions{display:flex;flex-shrink:0;gap:6px}#xqc-native-panel .xqc-caption{display:block;margin-top:3px;font-size:11px;letter-spacing:.3px;opacity:.55}#xqc-native-panel .xqc-actions button{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;padding:0;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:50%;background:transparent;color:inherit;font:23px/1 system-ui;cursor:pointer}#xqc-native-panel .xqc-actions button:hover{background:color-mix(in srgb,CanvasText 7%,Canvas)}#xqc-native-panel .xqc-actions button:focus-visible{outline:2px solid CanvasText;outline-offset:3px}#xqc-native-panel .xqc-footer{position:fixed;right:0;bottom:0;width:inherit;height:48px;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;border-top:1px solid color-mix(in srgb,CanvasText 10%,transparent);background:Canvas;color:CanvasText;font:10px system-ui}#xqc-native-panel .xqc-footer-note{display:flex;align-items:center;gap:3px;height:18px;white-space:nowrap;opacity:.72}#xqc-native-panel .xqc-footer-note .xqc-version{font-weight:600}#xqc-native-panel .xqc-footer-links{display:flex;align-items:center;justify-content:center;gap:10px;height:24px}#xqc-native-panel .xqc-footer a{display:grid;place-items:center;width:22px;height:22px;color:inherit;text-decoration:none;opacity:.65}#xqc-native-panel .xqc-footer-note a{display:inline;width:auto;height:auto;color:inherit;text-decoration:underline;opacity:1}#xqc-native-panel .xqc-footer a:hover{opacity:1}#xqc-native-panel .xqc-footer a:focus-visible{outline:2px solid CanvasText;outline-offset:1px}#xqc-native-panel .xqc-footer svg{width:14px;height:14px}#xqc-native-panel .xqc-footer a span{font:16px/1 system-ui}#xqc-native-panel [data-testid="like"].xqc-liked-from-store,#xqc-native-panel [data-testid="like"].xqc-liked-from-store svg{color:rgb(249,24,128)!important}#xqc-native-panel.xqc-stalled .xqc-root [role=progressbar]{display:none!important}#xqc-native-panel .xqc-root main{width:100%;max-width:100%;min-width:0}#xqc-native-panel .xqc-root aside,#xqc-native-panel [data-testid="sidebarColumn"]{display:none!important}#xqc-native-panel [data-testid="primaryColumn"]{width:100%!important;min-width:0!important;max-width:100%!important}#xqc-native-panel .xqc-root:has(>div){min-height:50px}`;
   document.head.append(style); document.body.append(host);
   // #layers itself can have z-index 101 while its ancestors remain in a
   // z-index:0 stacking context. A body-level panel still covers that entire
@@ -48,14 +48,24 @@
   const status = host.querySelector('[role=status]');
   const mount = host.querySelector('.xqc-root');
   let disposed = false, root, secondary, memory, ready, timeout, observer, desiredHandle, nativeError;
+  let loadedHandle, baselineArticle, baselineText;
   let tweetStore, unlistenTweets, likeFrame = 0;
   let loadSerial = 0;
+  const firstRetryMs = 8000, finalWaitMs = 6000;
   const report = message => { status.hidden = false; status.textContent = message; };
-  const hasPosts = handle => {
-    if (!mount.querySelector('article')) return false;
-    const name = mount.querySelector('[data-testid="UserName"]')?.textContent;
-    return !name || name.toLowerCase().includes('@' + handle.toLowerCase());
+  const hasPosts = () => {
+    const article=mount.querySelector('article');
+    // A profile may begin with a repost by another user. Check for newly
+    // rendered content rather than assuming the first UserName is the owner.
+    return !!article && (!baselineArticle || article!==baselineArticle || article.textContent!==baselineText);
   };
+  function finishLoading(handle, serial) {
+    if (disposed || nativeError || serial!==loadSerial || handle!==desiredHandle) return;
+    loadedHandle=handle;
+    status.hidden=true;
+    host.classList.remove('xqc-stalled');
+    clearTimeout(timeout);
+  }
   function syncLikeState() {
     let tweets;
     try { tweets=tweetStore?.getState?.()?.entities?.tweets?.entities; }
@@ -74,7 +84,8 @@
     likeFrame=requestAnimationFrame(()=>{likeFrame=0;syncLikeState();});
   }
   function showStalled(handle) {
-    report('X 已显示用户资料，但帖子列表仍在加载。');
+    host.classList.add('xqc-stalled');
+    report('帖子暂未加载出来。');
     const retry = document.createElement('button');
     retry.type = 'button'; retry.textContent = '重试侧栏';
     retry.onclick = () => { if (!disposed) void restart(handle); };
@@ -86,10 +97,11 @@
   function watchPosts(handle, serial, retried) {
     clearTimeout(timeout);
     timeout = setTimeout(() => {
-      if (disposed || nativeError || serial !== loadSerial || hasPosts(handle)) return;
+      if (disposed || nativeError || serial !== loadSerial) return;
+      if (hasPosts()) { finishLoading(handle,serial); return; }
       if (retried) showStalled(handle);
       else void restart(handle);
-    }, 15000);
+    }, retried ? finalWaitMs : firstRetryMs);
   }
   async function restart(handle) {
     if (disposed || handle !== desiredHandle) return;
@@ -99,6 +111,7 @@
     likeFrame=0; tweetStore=unlistenTweets=undefined;
     root?.unmount(); memory?.destroy?.();
     root = secondary = memory = observer = ready = undefined;
+    loadedHandle=baselineArticle=baselineText=undefined;
     await open(handle, true);
   }
   function captureError(error, info) {
@@ -339,11 +352,9 @@
     }
     observer=new MutationObserver(()=>{
       scheduleLikeSync();
-      if(!nativeError && hasPosts(desiredHandle)){
-        status.hidden=true;clearTimeout(timeout);
-      }
+      if(!status.hidden && !nativeError && hasPosts()) finishLoading(desiredHandle,loadSerial);
     });
-    observer.observe(mount,{subtree:true,childList:true});
+    observer.observe(mount,{subtree:true,childList:true,characterData:true});
     // React 19 reports errors caught by nested X boundaries here, even if X
     // discards the Error object and only renders its generic fallback screen.
     root=DOM.createRoot(mount,{onCaughtError:captureError,onUncaughtError:captureError});
@@ -353,14 +364,23 @@
   async function open(handle, retried = false) {
     if(nativeError){report(nativeError);return;}
     if (!position()) return;
+    if (!retried && loadedHandle===handle && memory?.location.pathname==='/'+handle && mount.querySelector('article')) {
+      status.hidden=true;
+      return;
+    }
+    baselineArticle=mount.querySelector('article');
+    baselineText=baselineArticle?.textContent;
+    loadedHandle=undefined;
+    host.classList.remove('xqc-stalled');
     desiredHandle = handle;
     const serial = ++loadSerial;
-    report('正在加载 @'+handle+' 的原生主页…');
+    report((retried?'正在重试 @':'正在加载 @')+handle+' 的原生主页…');
     watchPosts(handle, serial, retried);
     try {
       if (!ready) ready = initialize(handle);
       await ready; if (disposed) return;
       if(memory.location.pathname!=='/'+desiredHandle) secondary.navigate({to:'/'+desiredHandle});
+      if(hasPosts()) finishLoading(handle,serial);
     } catch(error) { clearTimeout(timeout); report('实验未成功：'+error.message+'\n关闭即可恢复；请把这段提示发给我。'); }
   }
   function onClick(event) {

@@ -44,7 +44,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       window.fixtureTweetStore=fakeStore;
       function Notifications(){const [count,set]=R.useState(0);R.useEffect(()=>{mounts++;window.notificationMounts=mounts;},[]);return R.createElement('main',null,R.createElement('section',{'data-testid':'primaryColumn'},
         R.createElement('button',{id:'increment',onClick:()=>set(count+1)},'count '+count),
-        ...['alice','bob','broken','hanging'].map(name=>R.createElement('a',{href:'/'+name,key:name},R.createElement('span',{'data-testid':'UserAvatar-Container-'+name},name)))));}
+        ...['alice','bob','broken','hanging','slow'].map(name=>R.createElement('a',{href:'/'+name,key:name},R.createElement('span',{'data-testid':'UserAvatar-Container-'+name},name)))));}
       class SilentBoundary extends R.Component {
         state={failed:false};
         static getDerivedStateFromError(){return {failed:true};}
@@ -80,8 +80,10 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         const {filter,sort}=location.query || {};
         if(params.screenName==='broken')return R.createElement(SilentBoundary,null,R.createElement(BrokenProfile));
         if(params.screenName==='hanging')return R.createElement(HangingProfile);
+        if(params.screenName==='slow')return R.createElement(SlowProfile);
         return R.createElement('article',null,
           R.createElement('h2',null,params.screenName+' '+value),
+          R.createElement('div',{'data-testid':'UserName'},'@reposted-author'),
           R.createElement('a',{href:'/bob/photo'},R.createElement('span',{'data-testid':'UserAvatar-Container-bob'},'bob avatar')),
           R.createElement('div',{'data-testid':'tweet'},
             R.createElement('a',{href:'/'+params.screenName+'/status/123456789'},'tweet time'),
@@ -108,6 +110,16 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         return R.createElement('main',null,
           R.createElement('div',{'data-testid':'UserName'},'@hanging'),
           R.createElement('div',{role:'progressbar','aria-label':'正在加载 @hanging 的帖子'}));
+      }
+      function SlowProfile(){
+        const [loaded,setLoaded]=R.useState(false);
+        R.useEffect(()=>{
+          window.slowMounts=(window.slowMounts||0)+1;
+          const timer=setTimeout(()=>setLoaded(true),5000);
+          return ()=>clearTimeout(timer);
+        },[]);
+        return loaded?R.createElement('article',null,R.createElement('h2',null,'slow shared-context')):
+          R.createElement('div',{role:'progressbar','aria-label':'正在加载 @slow 的帖子'});
       }
       class ComposeScreen extends R.Component {
         componentDidMount(){
@@ -158,6 +170,9 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
     await page.locator('#app [data-testid="UserAvatar-Container-alice"]').click();
     await page.getByRole('heading',{name:'alice shared-context'}).waitFor({timeout:3000}).catch(async e=>{console.error(await page.locator('#xqc-native-panel').innerText());throw e;});
+    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel>[role=status]')?.hidden);
+    await page.locator('#app [data-testid="UserAvatar-Container-alice"]').click();
+    assert.equal(await page.locator('#xqc-native-panel>[role=status]').isHidden(),true);
     await page.locator('#xqc-native-panel #fixture-like').click();
     await page.waitForFunction(()=>document.querySelector('#xqc-native-panel #fixture-like')?.classList.contains('xqc-liked-from-store'));
     assert.equal(await page.locator('#xqc-native-panel #fixture-like svg').evaluate(el=>getComputedStyle(el).color),'rgb(249, 24, 128)');
@@ -261,11 +276,19 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.deepEqual(errors,[]);
     await page.clock.install();
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    await page.locator('#app [data-testid="UserAvatar-Container-slow"]').click();
+    await page.locator('#xqc-native-panel [role=progressbar]').waitFor({state:'attached'});
+    await page.clock.fastForward(5000);
+    await page.getByRole('heading',{name:'slow shared-context'}).waitFor();
+    assert.equal(await page.evaluate(()=>window.slowMounts),1);
+    assert.equal(await page.locator('#xqc-native-panel>[role=status]').isHidden(),true);
+    await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
     await page.locator('#app [data-testid="UserAvatar-Container-hanging"]').click();
     await page.locator('#xqc-native-panel [role=progressbar]').waitFor({state:'attached'});
-    await page.clock.fastForward(15000);
+    await page.clock.fastForward(8000);
     await page.waitForFunction(()=>window.hangingMounts===2);
-    await page.clock.fastForward(15000);
+    await page.clock.fastForward(6000);
     await page.getByRole('button',{name:'重试侧栏'}).waitFor();
     assert.equal(await page.locator('#xqc-native-panel>[role=status] a').getAttribute('href'),'/hanging');
     await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
