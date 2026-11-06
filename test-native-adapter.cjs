@@ -109,6 +109,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         R.useEffect(()=>{window.hangingMounts=(window.hangingMounts||0)+1;},[]);
         return R.createElement('main',null,
           R.createElement('div',{'data-testid':'UserName'},'@hanging'),
+          R.createElement('article',null,'Profile placeholder'),
           R.createElement('div',{role:'progressbar','aria-label':'正在加载 @hanging 的帖子'}));
       }
       function SlowProfile(){
@@ -118,7 +119,9 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
           const timer=setTimeout(()=>setLoaded(true),3000);
           return ()=>clearTimeout(timer);
         },[]);
-        return loaded?R.createElement('article',null,R.createElement('h2',null,'slow shared-context')):
+        return loaded?R.createElement('article',null,
+          R.createElement('h2',null,'slow shared-context'),
+          R.createElement('div',{'data-testid':'tweet'},'slow post')):
           R.createElement('div',{role:'progressbar','aria-label':'正在加载 @slow 的帖子'});
       }
       class ComposeScreen extends R.Component {
