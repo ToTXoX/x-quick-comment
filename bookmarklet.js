@@ -13,8 +13,8 @@
   }
   const host = document.createElement('section');
   host.id = 'xqc-native-panel';
-  host.setAttribute('aria-label','𝕏侧栏 · 用户主页');
-  const version = '3.13';
+  host.setAttribute('aria-label','𝕏侧栏 · 用户主页与帖子');
+  const version = '3.14';
   host.dataset.version=version;
   host.innerHTML = `<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">整页刷新需要重新点击书签，开启侧边栏</span></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></div></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 动态书签自动获取更新</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
   const style = document.createElement('style');
@@ -47,23 +47,32 @@
   alignWithNativeLayers();
   const status = host.querySelector('[role=status]');
   const mount = host.querySelector('.xqc-root');
-  let disposed = false, root, secondary, memory, ready, timeout, observer, desiredHandle, nativeError;
-  let loadedHandle, pendingHandle, failedHandle, baselineTweet, baselineText;
+  let disposed = false, root, secondary, memory, ready, timeout, observer, desiredPath, nativeError;
+  let loadedPath, pendingPath, failedPath, baselineTweet, baselineText;
   let tweetStore, unlistenTweets, likeFrame = 0;
   let sidebarScope, restoreNavigationConfig;
   let loadSerial = 0;
   const firstRetryMs = 3000, finalWaitMs = 4000;
   const report = message => { status.hidden = false; status.textContent = message; };
+  const statusId = path => path?.match(/^\/(?:[a-z0-9_]{1,15}\/status|i\/(?:web\/)?status)\/(\d+)\/?$/i)?.[1];
+  function conversationPath(link) {
+    if(!link) return;
+    const url=new URL(link.href);
+    return url.origin===location.origin && statusId(url.pathname) ? url.pathname : undefined;
+  }
   const hasPosts = () => {
-    const tweet=mount.querySelector('[data-testid="tweet"]');
+    const id=statusId(desiredPath);
+    const tweets=[...mount.querySelectorAll('[data-testid="tweet"]')];
+    const tweet=id?tweets.find(tweet=>[...tweet.querySelectorAll('a[href]')].some(link=>
+      link.closest('[data-testid="tweet"]')===tweet && statusId(new URL(link.href).pathname)===id)):tweets[0];
     // Profile placeholders and error screens may contain an article. Only a
     // newly rendered tweet means the timeline has actually produced posts.
     return !!tweet && (!baselineTweet || tweet!==baselineTweet || tweet.textContent!==baselineText);
   };
-  function finishLoading(handle, serial) {
-    if (disposed || nativeError || serial!==loadSerial || handle!==desiredHandle) return;
-    loadedHandle=handle;
-    pendingHandle=failedHandle=undefined;
+  function finishLoading(path, serial) {
+    if (disposed || nativeError || serial!==loadSerial || path!==desiredPath) return;
+    loadedPath=path;
+    pendingPath=failedPath=undefined;
     status.hidden=true;
     host.classList.remove('xqc-stalled');
     clearTimeout(timeout);
@@ -85,42 +94,42 @@
     if (disposed || likeFrame) return;
     likeFrame=requestAnimationFrame(()=>{likeFrame=0;syncLikeState();});
   }
-  function showStalled(handle) {
-    pendingHandle=undefined;
+  function showStalled(path) {
+    pendingPath=undefined;
     host.classList.add('xqc-stalled');
     report('帖子暂未加载出来。');
     const retry = document.createElement('button');
     retry.type = 'button'; retry.textContent = '重试侧栏';
-    retry.onclick = () => { if (!disposed) void restart(handle); };
+    retry.onclick = () => { if (!disposed) void restart(path); };
     const native = document.createElement('a');
-    native.href = '/' + handle; native.target = '_blank'; native.rel = 'noopener noreferrer';
+    native.href = path; native.target = '_blank'; native.rel = 'noopener noreferrer';
     native.textContent = '在 X 中打开';
     status.append(document.createElement('br'), retry, document.createTextNode(' · '), native);
   }
-  function watchPosts(handle, serial, retried) {
+  function watchPosts(path, serial, retried) {
     clearTimeout(timeout);
     timeout=setTimeout(()=>{
       if (disposed || nativeError || serial !== loadSerial) return;
-      if (hasPosts()) { finishLoading(handle,serial); return; }
-      if (retried) showStalled(handle);
-      else void restart(handle);
+      if (hasPosts()) { finishLoading(path,serial); return; }
+      if (retried) showStalled(path);
+      else void restart(path);
     },retried?finalWaitMs:firstRetryMs);
   }
-  async function restart(handle) {
-    if (disposed || handle !== desiredHandle) return;
+  async function restart(path) {
+    if (disposed || path !== desiredPath) return;
     nativeError = undefined;
     clearTimeout(timeout); observer?.disconnect(); unlistenTweets?.();
     if (likeFrame) cancelAnimationFrame(likeFrame);
     likeFrame=0; tweetStore=unlistenTweets=undefined;
     root?.unmount(); memory?.destroy?.();
     root = secondary = memory = observer = ready = undefined;
-    loadedHandle=pendingHandle=failedHandle=baselineTweet=baselineText=undefined;
-    await open(handle, true);
+    loadedPath=pendingPath=failedPath=baselineTweet=baselineText=undefined;
+    await open(path, true);
   }
   function captureError(error, info) {
     if (disposed) return;
     clearTimeout(timeout);
-    pendingHandle=undefined;
+    pendingPath=undefined;
     nativeError = ['原生组件异常（v'+version+'）', String(error?.message || error).slice(0,1800),
       String(error?.stack || '').slice(0,2800), String(info?.componentStack || '').slice(0,2800)]
       .filter(Boolean).join('\n\n');
@@ -139,8 +148,8 @@
   window[key] = clean;
   host.querySelector('[aria-label="关闭𝕏侧栏"]').onclick = clean;
   host.querySelector('[aria-label="重新加载侧栏"]').onclick = () => {
-    if (desiredHandle) void restart(desiredHandle);
-    else report('请先点击左侧头像。');
+    if (desiredPath) void restart(desiredPath);
+    else report('请先点击头像或通知中的帖子。');
   };
   function pageElement(selector) {
     return [...document.querySelectorAll(selector)].find(node =>
@@ -349,7 +358,7 @@
     }
     return {children:chosen.children,providers};
   }
-  async function initialize(handle) {
+  async function initialize(path) {
     const {React, DOM, Router, History, NativeLocation, NativeHistory, Navigation, StoreProvider}=runtime();
     const {children,providers}=findRoutes(React,Router);
     if(disposed)return;
@@ -359,7 +368,7 @@
       catch {return false;}
     });
     unlistenTweets=tweetStore?.subscribe(scheduleLikeSync);
-    memory=createNativeMemoryHistory(History,NativeLocation,'/'+handle);
+    memory=createNativeMemoryHistory(History,NativeLocation,path);
     // Compose must be owned by AppShell: its header, dismiss flow, and submit
     // controls depend on the primary route/modal providers. Never mount a second
     // composer in the copied route tree or copy/call a submit handler ourselves.
@@ -394,7 +403,12 @@
       }
       // X's app context also carries the main page history. The copied profile
       // must see the same sidebar history as React Router.
-      const scopedValue=value?.history===NativeHistory?{...value,history:memory}:value;
+      let scopedValue=value?.history===NativeHistory?{...value,history:memory}:value;
+      // Conversation unmount clears this AppShell callback. A sidebar route
+      // must not clear the main page's background-click handler.
+      if(typeof scopedValue?.setBackgroundClickHandler==='function') {
+        scopedValue={...scopedValue,setBackgroundClickHandler:()=>{}};
+      }
       element=React.createElement(type,{value:scopedValue},element);
     }
     class Boundary extends React.Component {
@@ -405,7 +419,7 @@
     }
     observer=new MutationObserver(()=>{
       scheduleLikeSync();
-      if(!status.hidden && !nativeError && hasPosts()) finishLoading(desiredHandle,loadSerial);
+      if(!status.hidden && !nativeError && hasPosts()) finishLoading(desiredPath,loadSerial);
     });
     observer.observe(mount,{subtree:true,childList:true,characterData:true});
     // React 19 reports errors caught by nested X boundaries here, even if X
@@ -415,36 +429,36 @@
       React.createElement(Boundary,null,element)));
   }
 
-  async function open(handle, retried = false) {
+  async function open(path, retried = false) {
     if(nativeError){report(nativeError);return;}
     if (!position()) return;
-    if (!retried && pendingHandle===handle) return;
-    if (!retried && desiredHandle===handle && (host.classList.contains('xqc-stalled') || failedHandle===handle)) {
-      return restart(handle);
+    if (!retried && pendingPath===path) return;
+    if (!retried && desiredPath===path && (host.classList.contains('xqc-stalled') || failedPath===path)) {
+      return restart(path);
     }
-    if (!retried && loadedHandle===handle && memory?.location.pathname==='/'+handle && mount.querySelector('[data-testid="tweet"]')) {
+    if (!retried && loadedPath===path && memory?.location.pathname===path && mount.querySelector('[data-testid="tweet"]')) {
       status.hidden=true;
       return;
     }
     baselineTweet=mount.querySelector('[data-testid="tweet"]');
     baselineText=baselineTweet?.textContent;
-    loadedHandle=undefined;
-    pendingHandle=handle;
-    failedHandle=undefined;
+    loadedPath=undefined;
+    pendingPath=path;
+    failedPath=undefined;
     host.classList.remove('xqc-stalled');
-    desiredHandle = handle;
+    desiredPath = path;
     const serial = ++loadSerial;
-    report((retried?'正在重试 @':'正在加载 @')+handle+' 的原生主页…');
-    watchPosts(handle, serial, retried);
+    report((retried?'正在重试':'正在加载')+(statusId(path)?'帖子会话':' @'+path.slice(1)+' 的原生主页')+'…');
+    watchPosts(path, serial, retried);
     try {
-      if (!ready) ready = initialize(handle);
+      if (!ready) ready = initialize(path);
       await ready; if (disposed || serial!==loadSerial) return;
-      if(memory.location.pathname!=='/'+desiredHandle) secondary.navigate({to:'/'+desiredHandle});
-      if(hasPosts()) finishLoading(handle,serial);
+      if(memory.location.pathname!==desiredPath) secondary.navigate({to:desiredPath});
+      if(hasPosts()) finishLoading(path,serial);
     } catch(error) {
       if (disposed || serial!==loadSerial) return;
       clearTimeout(timeout);
-      pendingHandle=undefined; failedHandle=handle;
+      pendingPath=undefined; failedPath=path;
       report('实验未成功：'+error.message+'\n关闭即可恢复；请把这段提示发给我。');
     }
   }
@@ -453,12 +467,30 @@
         !(event.target instanceof Element) || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const target=event.target, link=target.closest('a[href]');
     if(host.contains(target)) return;
-    if (!target.closest('main, [data-testid="primaryColumn"]') || !link) return;
+    if (!target.closest('main, [data-testid="primaryColumn"]')) return;
     const avatar='[data-testid^="UserAvatar-Container"],[data-testid="Tweet-User-Avatar"],img[src*="/profile_images/"],img[src*="/default_profile"]';
-    if (!target.closest(avatar) && !link.querySelector(avatar)) return;
-    const url=new URL(link.href), handle=url.pathname.match(/^\/([a-z0-9_]{1,15})(?:\/photo)?\/?$/i)?.[1];
-    if (url.origin!==location.origin || !handle) return;
-    event.preventDefault();event.stopImmediatePropagation(); void open(handle);
+    if(link && (target.closest(avatar) || link.querySelector(avatar))) {
+      const url=new URL(link.href), handle=url.pathname.match(/^\/([a-z0-9_]{1,15})(?:\/photo)?\/?$/i)?.[1];
+      if (url.origin===location.origin && handle) {
+        event.preventDefault();event.stopImmediatePropagation(); void open('/'+handle);
+        return;
+      }
+      if(target.closest(avatar)) return;
+    }
+    if(!/^\/notifications(?:\/|$)/.test(location.pathname)) return;
+    if(target.closest('button,[role="button"],input,textarea,select,[contenteditable="true"],video,audio,[data-testid="tweetPhoto"],[data-testid="quoteTweet"]')) return;
+    let path=conversationPath(link);
+    if(!link) {
+      const tweet=target.closest('[data-testid="tweet"]');
+      // X makes the article body clickable without an enclosing anchor. Its
+      // own timestamp permalink identifies the same native conversation.
+      if(!tweet || target.closest('[role="link"]')) return;
+      const timestamp=[...tweet.querySelectorAll('a[href]')].find(anchor=>
+        anchor.closest('[data-testid="tweet"]')===tweet && anchor.querySelector('time') && conversationPath(anchor));
+      path=conversationPath(timestamp);
+    }
+    if(!path || !position()) return;
+    event.preventDefault();event.stopImmediatePropagation(); void open(path);
   }
   function onPanelLink(event) {
     // Bubble after React: Link handlers preserve location.state and cancel the
@@ -473,5 +505,5 @@
   }
   document.addEventListener('click', onPanelLink);
   document.addEventListener('click', onClick, true);
-  if (!widthWarning) report('点击左侧头像，查看用户主页。');
+  if (!widthWarning) report('点击头像查看用户主页；点击通知中的帖子查看会话。');
 })();
