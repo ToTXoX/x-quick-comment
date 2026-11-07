@@ -370,19 +370,19 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
       const firstCard=page.locator('[data-notification-id="222"] .xqc-reply-context');
       await firstCard.waitFor();
-      assert.equal(await firstCard.locator('.xqc-reply-label').innerText(),'回复你的帖子');
+      assert.equal(await firstCard.locator('.xqc-reply-label').innerText(),'原帖');
       assert.equal(await firstCard.locator('.xqc-reply-author').innerText(),'@owner');
       assert.match(await firstCard.innerText(),/今天分享一个提高工作效率的方法/);
       assert.equal(await firstCard.getAttribute('href'),'/owner/status/111');
       const commentCard=page.locator('[data-notification-id="333"] .xqc-reply-context');
-      assert.equal(await commentCard.locator('.xqc-reply-label').innerText(),'回复的评论');
+      assert.equal(await commentCard.locator('.xqc-reply-label').innerText(),'原帖');
       assert.equal(await commentCard.getAttribute('href'),'/alice/status/222');
       assert.equal(await commentCard.locator('.xqc-reply-text').innerText(),'这个方法很有用');
       assert.equal(await page.locator('[data-notification-id="555"] .xqc-reply-context').count(),0);
       const missingCard=page.locator('[data-notification-id="444"] .xqc-reply-context');
-      assert.equal(await missingCard.locator('.xqc-reply-text').innerText(),'查看回复的帖子');
+      assert.equal(await missingCard.locator('.xqc-reply-text').innerText(),'点击查看');
       assert.equal(await missingCard.getAttribute('href'),'/i/web/status/777');
-      assert.equal(await missingCard.evaluate(el=>el.getBoundingClientRect().height),40);
+      assert.equal(await missingCard.evaluate(el=>el.getBoundingClientRect().height),36);
       // Keep both lines visible beside native actions; narrow columns wrap
       // without shrinking action targets or overflowing the notification.
       const checkPreviewLayout=async width=>{
@@ -409,10 +409,10 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       await firstCard.locator('.xqc-reply-text').filter({hasText:'图片 2 张'}).waitFor();
       assert.equal((await firstCard.innerText()).includes('https://t.co/media'),false);
       assert.equal(await firstCard.locator('.xqc-reply-text').evaluate(el=>getComputedStyle(el).textOverflow),'ellipsis');
-      assert.equal(await firstCard.evaluate(el=>el.getBoundingClientRect().height),40);
+      assert.equal(await firstCard.evaluate(el=>el.getBoundingClientRect().height),36);
       // New data enriches the card, but never switches to conversation_id_str.
       await page.evaluate(()=>fixtureTweetStore.updateNotifications({'777':{id_str:'777',user:'me',in_reply_to_status_id_str:'111',full_text:'<img src=x onerror=alert(1)> 这是直接回复对象'}}));
-      await missingCard.locator('.xqc-reply-label').filter({hasText:'回复你的评论'}).waitFor();
+      await missingCard.locator('.xqc-reply-text').filter({hasText:'这是直接回复对象'}).waitFor();
       assert.equal(await missingCard.getAttribute('href'),'/owner/status/777');
       assert.match(await missingCard.locator('.xqc-reply-text').innerText(),/<img src=x/);
       assert.equal(await missingCard.locator('img').count(),0);
@@ -450,7 +450,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       await page.waitForFunction(()=>document.querySelector('[data-notification-id="333"] .xqc-reply-context')?.getAttribute('href')==='/alice/status/222');
       assert.equal(await page.locator('[data-notification-id="333"] .xqc-reply-context').count(),1);
       await page.evaluate(()=>fixtureTweetStore.updateNotifications({'777':{id_str:'777',isDeleted:true,full_text:'Do not expose stale deleted content'}}));
-      await page.waitForFunction(()=>document.querySelector('[data-notification-id="444"] .xqc-reply-text')?.textContent==='查看回复的帖子');
+      await page.waitForFunction(()=>document.querySelector('[data-notification-id="444"] .xqc-reply-text')?.textContent==='点击查看');
       // Clicking the original notification still runs X's original route.
       await page.locator('[data-notification-id="333"] > [data-testid="tweetText"]').click();
       await page.waitForFunction(()=>fixtureMainHistory.location.pathname==='/alice/status/333');
