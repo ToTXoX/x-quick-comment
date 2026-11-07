@@ -13,8 +13,8 @@
   }
   const host = document.createElement('section');
   host.id = 'xqc-native-panel';
-  host.setAttribute('aria-label','𝕏侧栏 · 用户主页与帖子');
-  const version = '3.14';
+  host.setAttribute('aria-label','𝕏侧栏 · 用户主页');
+  const version = '3.15';
   host.dataset.version=version;
   host.innerHTML = `<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">整页刷新需要重新点击书签，开启侧边栏</span></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></div></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 动态书签自动获取更新</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
   const style = document.createElement('style');
@@ -47,32 +47,111 @@
   alignWithNativeLayers();
   const status = host.querySelector('[role=status]');
   const mount = host.querySelector('.xqc-root');
-  let disposed = false, root, secondary, memory, ready, timeout, observer, desiredPath, nativeError;
-  let loadedPath, pendingPath, failedPath, baselineTweet, baselineText;
+  let disposed = false, root, secondary, memory, ready, timeout, observer, desiredHandle, nativeError;
+  let loadedHandle, pendingHandle, failedHandle, baselineTweet, baselineText;
   let tweetStore, unlistenTweets, likeFrame = 0;
   let sidebarScope, restoreNavigationConfig;
+  let previewStore, unlistenPreviews, previewFrame=0;
+  const previewCards=new Map();
+  const previewObserver=new MutationObserver(records=>{
+    const owned=node=>node instanceof Element && (host.contains(node) || node.closest('.xqc-reply-context'));
+    if(records.some(record=>!owned(record.target) &&
+      (record.type!=='childList' || [...record.addedNodes,...record.removedNodes].some(node=>!owned(node))))) schedulePreviews();
+  });
+  style.textContent+=`.xqc-reply-context{display:block;box-sizing:border-box;max-width:100%;margin:10px 0 8px;padding:10px 12px;border:1px solid #8885;border-radius:12px;background:#8881;color:inherit;text-decoration:none;font:13px/1.45 system-ui;overflow:hidden}.xqc-reply-context:hover{background:#8882}.xqc-reply-context:focus-visible{outline:2px solid currentColor;outline-offset:2px}.xqc-reply-context .xqc-reply-label{font-weight:600}.xqc-reply-context .xqc-reply-author{margin-left:8px;opacity:.7}.xqc-reply-context .xqc-reply-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;white-space:pre-wrap;margin-top:4px}`;
+  function schedulePreviews() {
+    if(disposed || previewFrame) return;
+    previewFrame=requestAnimationFrame(()=>{previewFrame=0;syncPreviews();});
+  }
+  function clearPreviews() {
+    for(const {card} of previewCards.values()) card.remove();
+    previewCards.clear();
+  }
+  function syncPreviews() {
+    if(disposed) return;
+    if(!/^\/notifications(?:\/|$)/.test(location.pathname)) {
+      clearPreviews();unlistenPreviews?.();unlistenPreviews=previewStore=undefined;return;
+    }
+    const main=mainColumn();
+    let store,viewerId;
+    for(let fiber=main && fiberOf(main);fiber;fiber=fiber.return) {
+      const value=fiber.memoizedProps?.value;
+      if(value?.viewerUserId) viewerId=String(value.viewerUserId);
+      const candidate=value?.store || value;
+      if(!store && typeof candidate?.getState==='function' && typeof candidate?.subscribe==='function') {
+        try {if(candidate.getState()?.entities?.tweets?.entities) store=candidate;} catch {}
+      }
+    }
+    if(store!==previewStore) {
+      unlistenPreviews?.();previewStore=store;
+      unlistenPreviews=store?.subscribe(schedulePreviews);
+    }
+    let state;
+    try {state=store?.getState();} catch {}
+    const tweets=state?.entities?.tweets?.entities, users=state?.entities?.users?.entities;
+    const seen=new Set();
+    for(const article of main?.querySelectorAll('[data-testid="tweet"]') || []) {
+      if(host.contains(article)) continue;
+      const timestamp=[...article.querySelectorAll('a[href]')].find(link=>
+        !link.closest('.xqc-reply-context,[data-testid="quoteTweet"]') &&
+        link.closest('[data-testid="tweet"]')===article && link.querySelector('time') &&
+        new URL(link.href).origin===location.origin && /\/status\/\d+\/?$/.test(new URL(link.href).pathname));
+      const id=timestamp?.pathname.match(/\/status\/(\d+)\/?$/)?.[1];
+      const reply=id && tweets?.[id],parentId=reply?.in_reply_to_status_id_str;
+      if(typeof parentId!=='string' || !/^\d+$/.test(parentId) || parentId===id) continue;
+      seen.add(article);
+      const parent=tweets[parentId];
+      const available=parent && !parent.isDeleted && !parent.tombstoneInfo;
+      const user=available && (typeof parent.user==='object'?parent.user:users?.[parent.user || parent.user_id_str]);
+      const userId=user?.id_str || (typeof parent?.user==='string'?parent.user:parent?.user_id_str) || reply.in_reply_to_user_id_str;
+      const name=user?.screen_name || reply.in_reply_to_screen_name;
+      const handle=typeof name==='string' && /^[a-z0-9_]{1,15}$/i.test(name)?name:undefined;
+      const own=viewerId && String(userId)===viewerId;
+      const kind=available && parent.in_reply_to_status_id_str?'评论':'帖子';
+      const label='回复'+(own?'你的':'的')+kind;
+      const text=available && (parent.note_tweet?.text || parent.full_text || parent.text);
+      const excerpt=typeof text==='string' && text.trim()?text.slice(0,600):'查看回复的帖子';
+      const href=handle?'/'+handle+'/status/'+parentId:'/i/web/status/'+parentId;
+      const signature=JSON.stringify([id,parentId,label,handle,excerpt,href]);
+      let record=previewCards.get(article);
+      if(!record) {
+        const card=document.createElement('a');card.className='xqc-reply-context';
+        // Let the link open its actual target, not the surrounding reply's
+        // React onClick. Default link navigation and modifier keys still work.
+        card.addEventListener('click',event=>event.stopPropagation());
+        record={card};previewCards.set(article,record);
+      }
+      if(record.signature!==signature) {
+        const labelNode=document.createElement('span');labelNode.className='xqc-reply-label';labelNode.textContent=label;
+        const author=document.createElement('span');author.className='xqc-reply-author';author.textContent=handle?'@'+handle:'';
+        const body=document.createElement('span');body.className='xqc-reply-text';body.textContent=excerpt;
+        record.card.href=href;record.card.replaceChildren(labelNode,author,body);
+        record.signature=signature;
+      }
+      if(!article.contains(record.card)) {
+        const textNode=[...article.querySelectorAll('[data-testid="tweetText"]')].find(node=>
+          node.closest('[data-testid="tweet"]')===article && !node.closest('[data-testid="quoteTweet"]'));
+        if(textNode && !textNode.closest('a')) textNode.after(record.card);
+        else article.append(record.card);
+      }
+    }
+    for(const [article,record] of previewCards) if(!seen.has(article)) {
+      record.card.remove();previewCards.delete(article);
+    }
+  }
   let loadSerial = 0;
   const firstRetryMs = 3000, finalWaitMs = 4000;
   const report = message => { status.hidden = false; status.textContent = message; };
-  const statusId = path => path?.match(/^\/(?:[a-z0-9_]{1,15}\/status|i\/(?:web\/)?status)\/(\d+)\/?$/i)?.[1];
-  function conversationPath(link) {
-    if(!link) return;
-    const url=new URL(link.href);
-    return url.origin===location.origin && statusId(url.pathname) ? url.pathname : undefined;
-  }
   const hasPosts = () => {
-    const id=statusId(desiredPath);
-    const tweets=[...mount.querySelectorAll('[data-testid="tweet"]')];
-    const tweet=id?tweets.find(tweet=>[...tweet.querySelectorAll('a[href]')].some(link=>
-      link.closest('[data-testid="tweet"]')===tweet && statusId(new URL(link.href).pathname)===id)):tweets[0];
+    const tweet=mount.querySelector('[data-testid="tweet"]');
     // Profile placeholders and error screens may contain an article. Only a
     // newly rendered tweet means the timeline has actually produced posts.
     return !!tweet && (!baselineTweet || tweet!==baselineTweet || tweet.textContent!==baselineText);
   };
-  function finishLoading(path, serial) {
-    if (disposed || nativeError || serial!==loadSerial || path!==desiredPath) return;
-    loadedPath=path;
-    pendingPath=failedPath=undefined;
+  function finishLoading(handle, serial) {
+    if (disposed || nativeError || serial!==loadSerial || handle!==desiredHandle) return;
+    loadedHandle=handle;
+    pendingHandle=failedHandle=undefined;
     status.hidden=true;
     host.classList.remove('xqc-stalled');
     clearTimeout(timeout);
@@ -94,42 +173,42 @@
     if (disposed || likeFrame) return;
     likeFrame=requestAnimationFrame(()=>{likeFrame=0;syncLikeState();});
   }
-  function showStalled(path) {
-    pendingPath=undefined;
+  function showStalled(handle) {
+    pendingHandle=undefined;
     host.classList.add('xqc-stalled');
     report('帖子暂未加载出来。');
     const retry = document.createElement('button');
     retry.type = 'button'; retry.textContent = '重试侧栏';
-    retry.onclick = () => { if (!disposed) void restart(path); };
+    retry.onclick = () => { if (!disposed) void restart(handle); };
     const native = document.createElement('a');
-    native.href = path; native.target = '_blank'; native.rel = 'noopener noreferrer';
+    native.href = '/' + handle; native.target = '_blank'; native.rel = 'noopener noreferrer';
     native.textContent = '在 X 中打开';
     status.append(document.createElement('br'), retry, document.createTextNode(' · '), native);
   }
-  function watchPosts(path, serial, retried) {
+  function watchPosts(handle, serial, retried) {
     clearTimeout(timeout);
     timeout=setTimeout(()=>{
       if (disposed || nativeError || serial !== loadSerial) return;
-      if (hasPosts()) { finishLoading(path,serial); return; }
-      if (retried) showStalled(path);
-      else void restart(path);
+      if (hasPosts()) { finishLoading(handle,serial); return; }
+      if (retried) showStalled(handle);
+      else void restart(handle);
     },retried?finalWaitMs:firstRetryMs);
   }
-  async function restart(path) {
-    if (disposed || path !== desiredPath) return;
+  async function restart(handle) {
+    if (disposed || handle !== desiredHandle) return;
     nativeError = undefined;
     clearTimeout(timeout); observer?.disconnect(); unlistenTweets?.();
     if (likeFrame) cancelAnimationFrame(likeFrame);
     likeFrame=0; tweetStore=unlistenTweets=undefined;
     root?.unmount(); memory?.destroy?.();
     root = secondary = memory = observer = ready = undefined;
-    loadedPath=pendingPath=failedPath=baselineTweet=baselineText=undefined;
-    await open(path, true);
+    loadedHandle=pendingHandle=failedHandle=baselineTweet=baselineText=undefined;
+    await open(handle, true);
   }
   function captureError(error, info) {
     if (disposed) return;
     clearTimeout(timeout);
-    pendingPath=undefined;
+    pendingHandle=undefined;
     nativeError = ['原生组件异常（v'+version+'）', String(error?.message || error).slice(0,1800),
       String(error?.stack || '').slice(0,2800), String(info?.componentStack || '').slice(0,2800)]
       .filter(Boolean).join('\n\n');
@@ -137,6 +216,9 @@
   }
   const clean = () => {
     disposed = true; clearTimeout(timeout);
+    previewObserver.disconnect();unlistenPreviews?.();
+    if(previewFrame) cancelAnimationFrame(previewFrame);
+    window.removeEventListener('popstate',schedulePreviews);clearPreviews();
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('click', onPanelLink);
     window.removeEventListener('resize', position);
@@ -148,8 +230,8 @@
   window[key] = clean;
   host.querySelector('[aria-label="关闭𝕏侧栏"]').onclick = clean;
   host.querySelector('[aria-label="重新加载侧栏"]').onclick = () => {
-    if (desiredPath) void restart(desiredPath);
-    else report('请先点击头像或通知中的帖子。');
+    if (desiredHandle) void restart(desiredHandle);
+    else report('请先点击左侧头像。');
   };
   function pageElement(selector) {
     return [...document.querySelectorAll(selector)].find(node =>
@@ -358,7 +440,7 @@
     }
     return {children:chosen.children,providers};
   }
-  async function initialize(path) {
+  async function initialize(handle) {
     const {React, DOM, Router, History, NativeLocation, NativeHistory, Navigation, StoreProvider}=runtime();
     const {children,providers}=findRoutes(React,Router);
     if(disposed)return;
@@ -368,7 +450,7 @@
       catch {return false;}
     });
     unlistenTweets=tweetStore?.subscribe(scheduleLikeSync);
-    memory=createNativeMemoryHistory(History,NativeLocation,path);
+    memory=createNativeMemoryHistory(History,NativeLocation,'/'+handle);
     // Compose must be owned by AppShell: its header, dismiss flow, and submit
     // controls depend on the primary route/modal providers. Never mount a second
     // composer in the copied route tree or copy/call a submit handler ourselves.
@@ -403,12 +485,7 @@
       }
       // X's app context also carries the main page history. The copied profile
       // must see the same sidebar history as React Router.
-      let scopedValue=value?.history===NativeHistory?{...value,history:memory}:value;
-      // Conversation unmount clears this AppShell callback. A sidebar route
-      // must not clear the main page's background-click handler.
-      if(typeof scopedValue?.setBackgroundClickHandler==='function') {
-        scopedValue={...scopedValue,setBackgroundClickHandler:()=>{}};
-      }
+      const scopedValue=value?.history===NativeHistory?{...value,history:memory}:value;
       element=React.createElement(type,{value:scopedValue},element);
     }
     class Boundary extends React.Component {
@@ -419,7 +496,7 @@
     }
     observer=new MutationObserver(()=>{
       scheduleLikeSync();
-      if(!status.hidden && !nativeError && hasPosts()) finishLoading(desiredPath,loadSerial);
+      if(!status.hidden && !nativeError && hasPosts()) finishLoading(desiredHandle,loadSerial);
     });
     observer.observe(mount,{subtree:true,childList:true,characterData:true});
     // React 19 reports errors caught by nested X boundaries here, even if X
@@ -429,36 +506,36 @@
       React.createElement(Boundary,null,element)));
   }
 
-  async function open(path, retried = false) {
+  async function open(handle, retried = false) {
     if(nativeError){report(nativeError);return;}
     if (!position()) return;
-    if (!retried && pendingPath===path) return;
-    if (!retried && desiredPath===path && (host.classList.contains('xqc-stalled') || failedPath===path)) {
-      return restart(path);
+    if (!retried && pendingHandle===handle) return;
+    if (!retried && desiredHandle===handle && (host.classList.contains('xqc-stalled') || failedHandle===handle)) {
+      return restart(handle);
     }
-    if (!retried && loadedPath===path && memory?.location.pathname===path && mount.querySelector('[data-testid="tweet"]')) {
+    if (!retried && loadedHandle===handle && memory?.location.pathname==='/'+handle && mount.querySelector('[data-testid="tweet"]')) {
       status.hidden=true;
       return;
     }
     baselineTweet=mount.querySelector('[data-testid="tweet"]');
     baselineText=baselineTweet?.textContent;
-    loadedPath=undefined;
-    pendingPath=path;
-    failedPath=undefined;
+    loadedHandle=undefined;
+    pendingHandle=handle;
+    failedHandle=undefined;
     host.classList.remove('xqc-stalled');
-    desiredPath = path;
+    desiredHandle = handle;
     const serial = ++loadSerial;
-    report((retried?'正在重试':'正在加载')+(statusId(path)?'帖子会话':' @'+path.slice(1)+' 的原生主页')+'…');
-    watchPosts(path, serial, retried);
+    report((retried?'正在重试 @':'正在加载 @')+handle+' 的原生主页…');
+    watchPosts(handle, serial, retried);
     try {
-      if (!ready) ready = initialize(path);
+      if (!ready) ready = initialize(handle);
       await ready; if (disposed || serial!==loadSerial) return;
-      if(memory.location.pathname!==desiredPath) secondary.navigate({to:desiredPath});
-      if(hasPosts()) finishLoading(path,serial);
+      if(memory.location.pathname!=='/'+desiredHandle) secondary.navigate({to:'/'+desiredHandle});
+      if(hasPosts()) finishLoading(handle,serial);
     } catch(error) {
       if (disposed || serial!==loadSerial) return;
       clearTimeout(timeout);
-      pendingPath=undefined; failedPath=path;
+      pendingHandle=undefined; failedHandle=handle;
       report('实验未成功：'+error.message+'\n关闭即可恢复；请把这段提示发给我。');
     }
   }
@@ -467,30 +544,12 @@
         !(event.target instanceof Element) || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const target=event.target, link=target.closest('a[href]');
     if(host.contains(target)) return;
-    if (!target.closest('main, [data-testid="primaryColumn"]')) return;
+    if (!target.closest('main, [data-testid="primaryColumn"]') || !link) return;
     const avatar='[data-testid^="UserAvatar-Container"],[data-testid="Tweet-User-Avatar"],img[src*="/profile_images/"],img[src*="/default_profile"]';
-    if(link && (target.closest(avatar) || link.querySelector(avatar))) {
-      const url=new URL(link.href), handle=url.pathname.match(/^\/([a-z0-9_]{1,15})(?:\/photo)?\/?$/i)?.[1];
-      if (url.origin===location.origin && handle) {
-        event.preventDefault();event.stopImmediatePropagation(); void open('/'+handle);
-        return;
-      }
-      if(target.closest(avatar)) return;
-    }
-    if(!/^\/notifications(?:\/|$)/.test(location.pathname)) return;
-    if(target.closest('button,[role="button"],input,textarea,select,[contenteditable="true"],video,audio,[data-testid="tweetPhoto"],[data-testid="quoteTweet"]')) return;
-    let path=conversationPath(link);
-    if(!link) {
-      const tweet=target.closest('[data-testid="tweet"]');
-      // X makes the article body clickable without an enclosing anchor. Its
-      // own timestamp permalink identifies the same native conversation.
-      if(!tweet || target.closest('[role="link"]')) return;
-      const timestamp=[...tweet.querySelectorAll('a[href]')].find(anchor=>
-        anchor.closest('[data-testid="tweet"]')===tweet && anchor.querySelector('time') && conversationPath(anchor));
-      path=conversationPath(timestamp);
-    }
-    if(!path || !position()) return;
-    event.preventDefault();event.stopImmediatePropagation(); void open(path);
+    if (!target.closest(avatar) && !link.querySelector(avatar)) return;
+    const url=new URL(link.href), handle=url.pathname.match(/^\/([a-z0-9_]{1,15})(?:\/photo)?\/?$/i)?.[1];
+    if (url.origin!==location.origin || !handle) return;
+    event.preventDefault();event.stopImmediatePropagation(); void open(handle);
   }
   function onPanelLink(event) {
     // Bubble after React: Link handlers preserve location.state and cancel the
@@ -505,5 +564,8 @@
   }
   document.addEventListener('click', onPanelLink);
   document.addEventListener('click', onClick, true);
-  if (!widthWarning) report('点击头像查看用户主页；点击通知中的帖子查看会话。');
+  previewObserver.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['href']});
+  window.addEventListener('popstate',schedulePreviews);
+  schedulePreviews();
+  if (!widthWarning) report('点击左侧头像，查看用户主页。');
 })();

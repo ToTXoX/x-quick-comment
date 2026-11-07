@@ -62,33 +62,40 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       }
       const navHost=document.createElement('div');document.body.append(navHost);
       DOM.createRoot(navHost).render(R.createElement(R.Fragment,null,R.createElement(MainConfig),R.createElement(Navigation)));
-      let storeState={timelineRevision:0,entities:{tweets:{entities:{'123456789':{favorited:false}}}}};
+      let storeState={timelineRevision:0,notificationIds:['222','333','444','555'],entities:{
+        users:{entities:{me:{id_str:'me',screen_name:'owner'},alice:{id_str:'alice',screen_name:'alice'}}},
+        tweets:{entities:{'123456789':{favorited:false},
+          '111':{id_str:'111',user:'me',full_text:'今天分享一个提高工作效率的方法。先整理任务，再集中处理通知。'},
+          '222':{id_str:'222',user:'alice',full_text:'这个方法很有用',in_reply_to_status_id_str:'111',in_reply_to_user_id_str:'me',in_reply_to_screen_name:'owner',conversation_id_str:'111'},
+          '333':{id_str:'333',user:'me',full_text:'谢谢，我也这样做',in_reply_to_status_id_str:'222',in_reply_to_user_id_str:'alice',in_reply_to_screen_name:'alice',conversation_id_str:'111'},
+          '444':{id_str:'444',full_text:'有一个补充问题',in_reply_to_status_id_str:'777',conversation_id_str:'111'},
+          '555':{id_str:'555',full_text:'This is a quote, not a reply',quoted_status:'111'}
+        }}}};
       const listeners=new Set();
       const fakeStore={getState:()=>storeState,subscribe:fn=>{listeners.add(fn);return ()=>listeners.delete(fn);},
         dispatch:action=>{storeState={...storeState,timelineRevision:action.revision};for(const fn of [...listeners])fn();return action;},
         subscriberCount:()=>listeners.size,
+        updateNotifications:(tweets,ids)=>{
+          storeState={...storeState,notificationIds:ids || storeState.notificationIds,
+            entities:{...storeState.entities,tweets:{entities:{...storeState.entities.tweets.entities,...tweets}}}};
+          for(const fn of [...listeners])fn();
+        },
         setFavorited:value=>{storeState.entities.tweets.entities['123456789'].favorited=value;for(const fn of listeners)fn();}};
       window.fixtureTweetStore=fakeStore;
-      function NotificationPost(){
-        const history=RR.useHistory();
-        return R.createElement('article',{'data-testid':'tweet',id:'notification-post',onClick:()=>{
-          window.fixtureNativePostClicks=(window.fixtureNativePostClicks||0)+1;
-          history.push('/alice/status/222');
-        }},
-          R.createElement('a',{href:'/alice'},R.createElement('span',{'data-testid':'UserAvatar-Container-notificationAlice',id:'notification-avatar'},'alice')),
-          R.createElement('a',{href:'/alice/status/222',id:'notification-time'},R.createElement('time',{dateTime:'2026-11-07'},'now')),
-          R.createElement('div',{'data-testid':'tweetText',id:'notification-body'},'A reply to your post'),
-          R.createElement('button',{id:'notification-like',onClick:event=>{event.stopPropagation();window.fixtureNotificationLikes=(window.fixtureNotificationLikes||0)+1;}},'Like notification'),
-          R.createElement('a',{id:'notification-external',href:'https://example.com/',onClick:event=>{event.preventDefault();event.stopPropagation();window.fixtureExternalClicks=(window.fixtureExternalClicks||0)+1;}},'External link'));
+      function NotificationRows(){
+        const state=Redux.d4(state=>state),history=RR.useHistory();
+        return state.notificationIds.map((id,index)=>R.createElement('article',{'data-testid':'tweet','data-notification-id':id,key:index,onClick:()=>{
+          window.fixtureNativeNotificationClicks=(window.fixtureNativeNotificationClicks||0)+1;history.push('/alice/status/'+id);
+        },style:{padding:'16px',borderBottom:'1px solid #ddd'}},
+          R.createElement('div',{'data-testid':'quoteTweet'},R.createElement('a',{href:'/quoted/status/987'},R.createElement('time',null,'Quoted time'))),
+          R.createElement('a',{href:'/alice/status/'+id},R.createElement('time',null,'通知 · 刚刚')),
+          R.createElement('div',{'data-testid':'tweetText'},state.entities.tweets.entities[id]?.full_text),
+          R.createElement('button',{onClick:event=>{event.stopPropagation();window.fixtureNotificationLikes=(window.fixtureNotificationLikes||0)+1;}},'Like notification')));
       }
       function NotificationsContent(){const [count,set]=R.useState(0);R.useEffect(()=>{mounts++;window.notificationMounts=mounts;},[]);return R.createElement('main',null,R.createElement('section',{'data-testid':'primaryColumn'},
         R.createElement('button',{id:'increment',onClick:()=>set(count+1)},'count '+count),
         R.createElement('output',{id:'main-store-state'},Redux.d4(state=>state.timelineRevision)),
-        R.createElement(NotificationPost),
-        R.createElement('a',{href:'/carol/status/444',id:'notification-link'},
-          R.createElement('span',{'data-testid':'UserAvatar-Container-group'},'carol'),
-          R.createElement('span',{id:'notification-link-text'},'A linked notification')),
-        R.createElement('a',{href:'/alice/status/999',id:'notification-missing'},'A pending conversation'),
+        R.createElement(NotificationRows),
         ...['alice','bob','broken','hanging','slow','updates'].map(name=>R.createElement('a',{href:'/'+name,key:name},R.createElement('span',{'data-testid':'UserAvatar-Container-'+name},name)))));}
       // Real connect() inserts a nested subscription into the context copied
       // by the sidebar. Unmounting its owner must not strand the sidebar.
@@ -169,16 +176,9 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       }
       function ProfilePage(){return R.createElement('main',null,
         R.createElement('section',{'data-testid':'primaryColumn'},R.createElement(Profile)));}
-      function StatusPage(){
-        const {id}=RR.useParams(),context=R.useContext(StoreContext),history=RR.useHistory();
-        R.useEffect(()=>()=>context.setBackgroundClickHandler(null),[context]);
-        return R.createElement('main',null,
+      function StatusPage(){return R.createElement('main',null,
         R.createElement('section',{'data-testid':'primaryColumn'},
           R.createElement('h1',null,'Status page'),
-          R.createElement('output',{id:'thread-id'},id),
-          R.createElement('article',{'data-testid':'tweet'},R.createElement('a',{href:'/owner/status/111'},R.createElement('time',null,'earlier')),'Original post'),
-          id!=='999' && R.createElement('article',{'data-testid':'tweet'},R.createElement('a',{href:'/alice/status/'+id},R.createElement('time',null,'now')),'Selected reply'),
-          R.createElement('button',{id:'thread-reply',onClick:()=>history.push({pathname:'/compose/post',state:{inReplyToStatusId:id}})},'Reply to selected post'),
           R.createElement('a',{href:'/bob'},R.createElement('span',{'data-testid':'UserAvatar-Container-bob'},'bob avatar'))));}
       function HangingProfile(){
         R.useEffect(()=>{window.hangingMounts=(window.hangingMounts||0)+1;},[]);
@@ -243,8 +243,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         R.createElement(RR.Route,{path:'/:screenName/status/:id',exact:true,component:StatusPage}),
         R.createElement(RR.Route,{path:'/:screenName',exact:true,component:ProfilePage}))));
       DOM.createRoot(document.querySelector('#app')).render(R.createElement(Redux.Kq,{store:fakeStore},
-        R.createElement(StoreContext.Provider,{value:{store:fakeStore,history:nativeHistory,
-          setBackgroundClickHandler:()=>{window.fixtureBackgroundClears=(window.fixtureBackgroundClears||0)+1;}}},appTree)));
+        R.createElement(StoreContext.Provider,{value:{store:fakeStore,history:nativeHistory,viewerUserId:'me'}},appTree)));
     });
     await page.locator('#increment').click();
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
@@ -362,61 +361,64 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await page.locator('#layers').evaluate(el=>getComputedStyle(el).zIndex),'3');
     await page.locator('#increment').click();
     assert.equal(await page.locator('#increment').innerText(),'count 3');
+    if(/^\/notifications(?:\/|$)/.test(startPath)) {
+      const previewSubscribers=await page.evaluate(()=>fixtureTweetStore.subscriberCount());
+      await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+      const firstCard=page.locator('[data-notification-id="222"] .xqc-reply-context');
+      await firstCard.waitFor();
+      assert.equal(await firstCard.locator('.xqc-reply-label').innerText(),'回复你的帖子');
+      assert.equal(await firstCard.locator('.xqc-reply-author').innerText(),'@owner');
+      assert.match(await firstCard.innerText(),/今天分享一个提高工作效率的方法/);
+      assert.equal(await firstCard.getAttribute('href'),'/owner/status/111');
+      const commentCard=page.locator('[data-notification-id="333"] .xqc-reply-context');
+      assert.equal(await commentCard.locator('.xqc-reply-label').innerText(),'回复的评论');
+      assert.equal(await commentCard.getAttribute('href'),'/alice/status/222');
+      assert.equal(await commentCard.locator('.xqc-reply-text').innerText(),'这个方法很有用');
+      assert.equal(await page.locator('[data-notification-id="555"] .xqc-reply-context').count(),0);
+      const missingCard=page.locator('[data-notification-id="444"] .xqc-reply-context');
+      assert.equal(await missingCard.locator('.xqc-reply-text').innerText(),'查看回复的帖子');
+      assert.equal(await missingCard.getAttribute('href'),'/i/web/status/777');
+      // New data enriches the card, but never switches to conversation_id_str.
+      await page.evaluate(()=>fixtureTweetStore.updateNotifications({'777':{id_str:'777',user:'me',in_reply_to_status_id_str:'111',full_text:'<img src=x onerror=alert(1)> 这是直接回复对象'}}));
+      await missingCard.locator('.xqc-reply-label').filter({hasText:'回复你的评论'}).waitFor();
+      assert.equal(await missingCard.getAttribute('href'),'/owner/status/777');
+      assert.match(await missingCard.locator('.xqc-reply-text').innerText(),/<img src=x/);
+      assert.equal(await missingCard.locator('img').count(),0);
+      assert.equal(await firstCard.locator('.xqc-reply-text').evaluate(el=>getComputedStyle(el).webkitLineClamp),'2');
+      if(process.env.XQC_PREVIEW_SCREENSHOT) await page.screenshot({path:process.env.XQC_PREVIEW_SCREENSHOT});
+      // Preserve the link default (including modifiers); suppress only the
+      // surrounding notification's click. The test cancels actual navigation.
+      await firstCard.evaluate(link=>{
+        link.addEventListener('click',event=>{
+          window.fixturePreviewLinkDefault=!event.defaultPrevented;
+          event.preventDefault();
+        });
+      });
+      await firstCard.click();
+      assert.equal(await page.evaluate(()=>fixturePreviewLinkDefault),true);
+      assert.equal(await page.evaluate(()=>window.fixtureNativeNotificationClicks||0),0);
+      await page.locator('[data-notification-id="222"]').getByRole('button',{name:'Like notification'}).click();
+      assert.equal(await page.evaluate(()=>fixtureNotificationLikes),1);
+      // Virtualized row reuse must replace the old reply target, not duplicate it.
+      await page.evaluate(()=>fixtureTweetStore.updateNotifications({},['333','444','555']));
+      await page.waitForFunction(()=>document.querySelector('[data-notification-id="333"] .xqc-reply-context')?.getAttribute('href')==='/alice/status/222');
+      assert.equal(await page.locator('[data-notification-id="333"] .xqc-reply-context').count(),1);
+      await page.evaluate(()=>fixtureTweetStore.updateNotifications({'777':{id_str:'777',isDeleted:true,full_text:'Do not expose stale deleted content'}}));
+      await page.waitForFunction(()=>document.querySelector('[data-notification-id="444"] .xqc-reply-text')?.textContent==='查看回复的帖子');
+      // Clicking the original notification still runs X's original route.
+      await page.locator('[data-notification-id="333"] > [data-testid="tweetText"]').click();
+      await page.waitForFunction(()=>fixtureMainHistory.location.pathname==='/alice/status/333');
+      assert.equal(await page.evaluate(()=>fixtureNativeNotificationClicks),1);
+      assert.equal(await page.locator('#xqc-native-panel .xqc-root').innerText(),'');
+      await page.evaluate(()=>fixtureMainHistory.goBack());
+      await page.locator('[data-notification-id="333"] .xqc-reply-context').waitFor();
+      await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+      assert.equal(await page.locator('.xqc-reply-context').count(),0);
+      assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),previewSubscribers);
+    }
     // Freeze the sidebar's 3-second recovery so a rebuild cannot mask a lost
     // subscription. Both useSelector() and connect() must see completed data.
     await page.clock.install();
-    // Notification bodies/links open the native conversation in the sidebar.
-    // Keep the notifications route and its mounted DOM intact.
-    if(/^\/notifications(?:\/|$)/.test(startPath)) {
-    const beforeThreadMounts=await page.evaluate(()=>notificationMounts);
-    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
-    await page.locator('#notification-body').click();
-    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel #thread-id')?.textContent==='222');
-    assert.equal(new URL(page.url()).pathname,startPath);
-    assert.equal(await page.evaluate(()=>fixtureMainHistory.location.pathname),startPath);
-    assert.equal(await page.evaluate(()=>notificationMounts),beforeThreadMounts);
-    assert.equal(await page.evaluate(()=>window.fixtureNativePostClicks||0),0);
-    assert.equal(await page.locator('#xqc-native-panel>[role=status]').isHidden(),true);
-    await page.locator('#xqc-native-panel #thread-reply').click();
-    await page.locator('#reply').waitFor();
-    assert.equal(await page.evaluate(()=>fixtureNativeHistory.location.state.inReplyToStatusId),'222');
-    assert.equal(await page.locator('#xqc-native-panel #reply').count(),0);
-    await page.locator('#close-compose').click();
-    await page.getByRole('button',{name:'重新加载侧栏'}).click();
-    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel #thread-id')?.textContent==='222');
-    assert.equal(await page.evaluate(()=>window.fixtureBackgroundClears||0),0);
-    await page.locator('#notification-like').click();
-    assert.equal(await page.evaluate(()=>fixtureNotificationLikes),1);
-    await page.locator('#notification-external').click();
-    assert.equal(await page.evaluate(()=>fixtureExternalClicks),1);
-    await page.locator('#notification-link-text').click();
-    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel #thread-id')?.textContent==='444');
-    await page.locator('#notification-time').click();
-    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel #thread-id')?.textContent==='222');
-    // Observe propagation without opening extra tabs. Modified clicks must
-    // reach the link's own handler instead of the sidebar capture listener.
-    const nativeModifiedClicks=await page.evaluate(()=>['ctrlKey','metaKey','shiftKey','altKey'].map(modifier=>{
-      const link=document.getElementById('notification-time');let reached=false;
-      link.addEventListener('click',event=>{reached=true;event.preventDefault();event.stopPropagation();},{once:true});
-      link.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,[modifier]:true}));
-      return reached;
-    }));
-    assert.deepEqual(nativeModifiedClicks,[true,true,true,true]);
-    await page.locator('#notification-avatar').click();
-    await page.getByRole('heading',{name:'alice shared-context'}).waitFor();
-    // An ancestor rendered while the selected reply is still absent must not
-    // prematurely finish loading. Retry/fallback must retain the post URL.
-    await page.locator('#notification-missing').click();
-    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel #thread-id')?.textContent==='999');
-    assert.equal(await page.locator('#xqc-native-panel>[role=status]').isHidden(),false);
-    await page.clock.fastForward(3000);
-    await page.locator('#xqc-native-panel>[role=status]').filter({hasText:'正在重试帖子会话'}).waitFor();
-    await page.clock.fastForward(4000);
-    await page.getByRole('button',{name:'重试侧栏'}).waitFor();
-    assert.equal(await page.locator('#xqc-native-panel>[role=status] a').getAttribute('href'),'/alice/status/999');
-    await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
-    assert.equal(await page.evaluate(()=>window.fixtureBackgroundClears||0),0);
-    }
     const baselineSubscribers=await page.evaluate(()=>fixtureTweetStore.subscriberCount());
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
     await page.locator('#app [data-testid="UserAvatar-Container-updates"]').click();
@@ -502,6 +504,6 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
     assert.deepEqual(errors,[]);
     assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),baselineSubscribers);
-    console.log('PASS: notification conversations, click exclusions and post retry; independent subscriptions across main-page remounts and cleanup; renumbered modules; home, profile and status activation; native routing and composer; nested errors; stalled timeline retry and fallback. Native X profile/conversation still require live validation.');
+    console.log('PASS: direct-reply notification previews, missing/deleted data, recycled rows, native clicks and cleanup; independent subscriptions across main-page remounts; renumbered modules; native routing and composer; stalled timeline recovery. Real X DOM still requires live validation.');
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
