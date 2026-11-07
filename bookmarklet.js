@@ -14,7 +14,7 @@
   const host = document.createElement('section');
   host.id = 'xqc-native-panel';
   host.setAttribute('aria-label','𝕏侧栏 · 用户主页');
-  const version = '3.18';
+  const version = '3.19';
   host.dataset.version=version;
   host.innerHTML = `<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">整页刷新需要重新点击书签，开启侧边栏</span></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></div></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 动态书签自动获取更新</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
   const style = document.createElement('style');
@@ -59,16 +59,9 @@
       (record.type!=='childList' || [...record.addedNodes,...record.removedNodes].some(node=>!owned(node))))) schedulePreviews();
   });
   style.textContent+=`
-    .xqc-reply-actions{display:flex!important;flex-direction:row!important;flex-wrap:wrap!important;align-items:center!important;gap:6px!important;max-width:none!important}
-    .xqc-reply-actions>:not(.xqc-reply-context){flex:0 0 auto!important}
-    .xqc-reply-context{display:flex;flex-direction:column;justify-content:center;flex:1 1 150px;box-sizing:border-box;width:190px;max-width:100%;min-width:0;height:36px;margin:4px 0 4px auto;padding:3px 8px;border:0;border-left:3px solid #8899a680;border-radius:0 4px 4px 0;background:#8899a612;color:inherit;text-decoration:none;font:12px/16px system-ui;overflow:hidden}
-    .xqc-reply-actions>.xqc-reply-context{max-width:190px;margin:0 0 0 auto}
-    .xqc-reply-context:hover{background:#8899a624}
+    .xqc-reply-context{display:block;box-sizing:border-box;max-width:100%;min-width:0;margin:3px 0 0;padding:0;border:0;background:none;color:inherit;opacity:.6;text-decoration:none;font:12px/18px system-ui;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .xqc-reply-context:hover{text-decoration:underline}
     .xqc-reply-context:focus-visible{outline:2px solid currentColor;outline-offset:2px}
-    .xqc-reply-context .xqc-reply-heading{display:flex;gap:5px;align-items:center;min-width:0;font:500 10px/14px system-ui;opacity:.55}
-    .xqc-reply-context .xqc-reply-label{flex-shrink:0;letter-spacing:1px}
-    .xqc-reply-context .xqc-reply-author{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .xqc-reply-context .xqc-reply-text{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.68}
   `;
   function openPreview(event) {
     event.stopPropagation();
@@ -87,7 +80,7 @@
     previewFrame=requestAnimationFrame(()=>{previewFrame=0;syncPreviews();});
   }
   function clearPreviews() {
-    for(const {card,actions} of previewCards.values()) {card.remove();actions?.classList.remove('xqc-reply-actions');}
+    for(const {card} of previewCards.values()) card.remove();
     previewCards.clear();
   }
   function syncPreviews() {
@@ -148,27 +141,12 @@
         record={card};previewCards.set(article,record);
       }
       if(record.signature!==signature) {
-        const heading=document.createElement('span');heading.className='xqc-reply-heading';
-        const labelNode=document.createElement('span');labelNode.className='xqc-reply-label';labelNode.textContent=label;
-        const author=document.createElement('span');author.className='xqc-reply-author';author.textContent=handle?'@'+handle:'';
-        const arrow=document.createElement('span');arrow.textContent='↗';arrow.setAttribute('aria-hidden','true');
+        const labelNode=document.createElement('span');labelNode.className='xqc-reply-label';labelNode.textContent=label+'：';
         const body=document.createElement('span');body.className='xqc-reply-text';body.textContent=excerpt;
-        heading.append(labelNode,author,arrow);
-        record.card.href=href;record.card.dataset.empty=String(empty);record.card.replaceChildren(heading,body);
+        record.card.href=href;record.card.dataset.empty=String(empty);record.card.replaceChildren(labelNode,body);
         record.signature=signature;
       }
-      // Append only our link; do not wrap or move React-owned action buttons.
-      const actions=[...article.querySelectorAll('[role="group"]')].find(node=>
-        node.closest('[data-testid="tweet"]')===article && !node.closest('[data-testid="quoteTweet"]') &&
-        node.querySelector('[data-testid="reply"]') && node.querySelector('[data-testid="like"],[data-testid="unlike"]'));
-      if(record.actions!==actions) {
-        record.actions?.classList.remove('xqc-reply-actions');
-        record.card.remove();record.actions=actions;
-      }
-      if(actions) {
-        actions.classList.add('xqc-reply-actions');
-        if(record.card.parentElement!==actions) actions.append(record.card);
-      } else if(!article.contains(record.card)) {
+      if(!article.contains(record.card)) {
         const textNode=[...article.querySelectorAll('[data-testid="tweetText"]')].find(node=>
           node.closest('[data-testid="tweet"]')===article && !node.closest('[data-testid="quoteTweet"]'));
         if(textNode && !textNode.closest('a')) textNode.after(record.card);
@@ -176,7 +154,7 @@
       }
     }
     for(const [article,record] of previewCards) if(!seen.has(article)) {
-      record.card.remove();record.actions?.classList.remove('xqc-reply-actions');previewCards.delete(article);
+      record.card.remove();previewCards.delete(article);
     }
   }
   let loadSerial = 0;

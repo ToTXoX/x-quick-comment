@@ -370,46 +370,36 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
       const firstCard=page.locator('[data-notification-id="222"] .xqc-reply-context');
       await firstCard.waitFor();
-      assert.equal(await firstCard.locator('.xqc-reply-label').innerText(),'原帖');
-      assert.equal(await firstCard.locator('.xqc-reply-author').innerText(),'@owner');
+      assert.equal(await firstCard.locator('.xqc-reply-label').innerText(),'原帖：');
+      assert.equal(await firstCard.getAttribute('title'),null);
       assert.match(await firstCard.innerText(),/今天分享一个提高工作效率的方法/);
       assert.equal(await firstCard.getAttribute('href'),'/owner/status/111');
       const commentCard=page.locator('[data-notification-id="333"] .xqc-reply-context');
-      assert.equal(await commentCard.locator('.xqc-reply-label').innerText(),'原帖');
+      assert.equal(await commentCard.locator('.xqc-reply-label').innerText(),'原帖：');
       assert.equal(await commentCard.getAttribute('href'),'/alice/status/222');
       assert.equal(await commentCard.locator('.xqc-reply-text').innerText(),'这个方法很有用');
       assert.equal(await page.locator('[data-notification-id="555"] .xqc-reply-context').count(),0);
       const missingCard=page.locator('[data-notification-id="444"] .xqc-reply-context');
       assert.equal(await missingCard.locator('.xqc-reply-text').innerText(),'点击查看');
       assert.equal(await missingCard.getAttribute('href'),'/i/web/status/777');
-      assert.equal(await missingCard.evaluate(el=>el.getBoundingClientRect().height),36);
-      // Keep both lines visible beside native actions; narrow columns wrap
-      // without shrinking action targets or overflowing the notification.
-      const checkPreviewLayout=async width=>{
+      assert.equal(await missingCard.evaluate(el=>el.getBoundingClientRect().height),18);
+      // Preview sits below the comment without changing native action layout.
+      for(const width of [600,375,320]) {
         await page.locator('#app [data-testid="primaryColumn"]').evaluate((el,width)=>el.style.width=width+'px',width);
-        const boxes=await firstCard.evaluate(card=>{
-          const group=card.parentElement,box=el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width};};
-          return {card:box(card),group:box(group),buttons:[...group.querySelectorAll('button')].map(box),
-            heading:box(card.querySelector('.xqc-reply-heading')),text:box(card.querySelector('.xqc-reply-text'))};
-        });
-        assert.ok(boxes.card.left>=boxes.group.left && boxes.card.right<=boxes.group.right+1);
-        assert.ok(boxes.text.top>=boxes.heading.bottom && boxes.text.bottom<=boxes.card.bottom);
-        for(const button of boxes.buttons) {
-          assert.ok(button.width>=28);
-          assert.ok(button.right<=boxes.card.left || button.bottom<=boxes.card.top || button.top>=boxes.card.bottom);
-        }
-        if(width===600) assert.ok(boxes.buttons.every(button=>button.top>=boxes.card.top && button.bottom<=boxes.card.bottom));
-      };
-      for(const width of [600,375,320]) await checkPreviewLayout(width);
-      await checkPreviewLayout(600);
-      // Even long text plus media stays within the fixed two-line card.
+        assert.equal(await firstCard.evaluate(card=>card.previousElementSibling?.dataset.testid),'tweetText');
+        assert.equal(await firstCard.evaluate(card=>card.closest('[role="group"]')),null);
+
+        assert.equal(await firstCard.evaluate(card=>card.getBoundingClientRect().height),18);
+      }
+      await page.locator('#app [data-testid="primaryColumn"]').evaluate(el=>el.style.width='600px');
+      // Long text plus media remains truncated on one line.
       await page.evaluate(()=>fixtureTweetStore.updateNotifications({'111':{id_str:'111',user:'me',
         full_text:('整理任务，集中处理通知。\n').repeat(30)+' https://t.co/media',
         extended_entities:{media:[{type:'photo',url:'https://t.co/media'},{type:'photo'}]}}}));
       await firstCard.locator('.xqc-reply-text').filter({hasText:'图片 2 张'}).waitFor();
       assert.equal((await firstCard.innerText()).includes('https://t.co/media'),false);
-      assert.equal(await firstCard.locator('.xqc-reply-text').evaluate(el=>getComputedStyle(el).textOverflow),'ellipsis');
-      assert.equal(await firstCard.evaluate(el=>el.getBoundingClientRect().height),36);
+      assert.equal(await firstCard.evaluate(el=>getComputedStyle(el).textOverflow),'ellipsis');
+      assert.equal(await firstCard.evaluate(el=>el.getBoundingClientRect().height),18);
       // New data enriches the card, but never switches to conversation_id_str.
       await page.evaluate(()=>fixtureTweetStore.updateNotifications({'777':{id_str:'777',user:'me',in_reply_to_status_id_str:'111',full_text:'<img src=x onerror=alert(1)> 这是直接回复对象'}}));
       await missingCard.locator('.xqc-reply-text').filter({hasText:'这是直接回复对象'}).waitFor();
