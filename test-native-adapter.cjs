@@ -48,7 +48,13 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       const Navigation=makeConfigured(({composeOptions})=>R.createElement('button',{id:'main-post',onClick:()=>window.fixtureNativeHistory.push({pathname:'/compose/post',state:composeOptions})},'New post'));
       const originalConfigure=Navigation.Configure;
       // X's header wraps its memo Configure in a modal-aware function.
-      Navigation.Configure=props=>R.createElement(originalConfigure,props);
+      const ModalContext=R.createContext({isModal:false});
+      fixtureRequire.m[999998]=module=>{
+        // createContext({isModal:!1})
+        module.exports={A:ModalContext};
+      };
+      Navigation.Configure=props=>R.useContext(ModalContext).isModal?props.children:R.createElement(originalConfigure,props);
+      const CachedProfileConfigure=Navigation.Configure;
       window.fixtureNavigation=Navigation;
       window.fixtureOriginalConfigure=Navigation.Configure;
       fixtureRequire.m[999999]=module=>{
@@ -159,7 +165,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         if(params.screenName==='slow')return R.createElement(SlowProfile);
         if(params.screenName==='updates')return R.createElement(StoreProfile);
         return R.createElement('article',null,
-          R.createElement(Navigation.Configure,{composeOptions:{defaultText:'@'+params.screenName+' '}},R.createElement('span',{id:'configuration-child'},'Profile content')),
+          R.createElement(CachedProfileConfigure,{composeOptions:{defaultText:'@'+params.screenName+' '}},R.createElement('span',{id:'configuration-child'},'Profile content')),
           R.createElement('h2',null,params.screenName+' '+value),
           R.createElement('output',{id:'context-route'},contextHistory?.location.pathname),
           R.createElement('div',{'data-testid':'UserName'},'@reposted-author'),
