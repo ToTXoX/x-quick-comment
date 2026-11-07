@@ -90,7 +90,11 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
           R.createElement('div',{'data-testid':'quoteTweet'},R.createElement('a',{href:'/quoted/status/987'},R.createElement('time',null,'Quoted time'))),
           R.createElement('a',{href:'/alice/status/'+id},R.createElement('time',null,'通知 · 刚刚')),
           R.createElement('div',{'data-testid':'tweetText'},state.entities.tweets.entities[id]?.full_text),
-          R.createElement('button',{onClick:event=>{event.stopPropagation();window.fixtureNotificationLikes=(window.fixtureNotificationLikes||0)+1;}},'Like notification')));
+          R.createElement('div',{role:'group',style:{display:'flex',justifyContent:'space-between',maxWidth:425,marginTop:12}},
+            ...[['reply','♡',3],['retweet','⇄',1],['like','♥',8],['views','▥',12],['bookmark','♧',''],['share','↥','']].map(([testId,icon,count])=>
+              R.createElement('div',{key:testId,style:{flex:1}},R.createElement('button',{'data-testid':testId,'aria-label':testId==='like'?'Like notification':testId,
+                style:{border:0,background:'transparent',padding:4,minWidth:28,color:'#536471'},
+                onClick:event=>{event.stopPropagation();if(testId==='like')window.fixtureNotificationLikes=(window.fixtureNotificationLikes||0)+1;}},icon+' '+count))))));
       }
       function NotificationsContent(){const [count,set]=R.useState(0);R.useEffect(()=>{mounts++;window.notificationMounts=mounts;},[]);return R.createElement('main',null,R.createElement('section',{'data-testid':'primaryColumn'},
         R.createElement('button',{id:'increment',onClick:()=>set(count+1)},'count '+count),
@@ -378,16 +382,44 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       const missingCard=page.locator('[data-notification-id="444"] .xqc-reply-context');
       assert.equal(await missingCard.locator('.xqc-reply-text').innerText(),'查看回复的帖子');
       assert.equal(await missingCard.getAttribute('href'),'/i/web/status/777');
+      assert.equal(await missingCard.evaluate(el=>el.getBoundingClientRect().height),40);
+      // Keep both lines visible beside native actions; narrow columns wrap
+      // without shrinking action targets or overflowing the notification.
+      const checkPreviewLayout=async width=>{
+        await page.locator('#app [data-testid="primaryColumn"]').evaluate((el,width)=>el.style.width=width+'px',width);
+        const boxes=await firstCard.evaluate(card=>{
+          const group=card.parentElement,box=el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width};};
+          return {card:box(card),group:box(group),buttons:[...group.querySelectorAll('button')].map(box),
+            heading:box(card.querySelector('.xqc-reply-heading')),text:box(card.querySelector('.xqc-reply-text'))};
+        });
+        assert.ok(boxes.card.left>=boxes.group.left && boxes.card.right<=boxes.group.right+1);
+        assert.ok(boxes.text.top>=boxes.heading.bottom && boxes.text.bottom<=boxes.card.bottom);
+        for(const button of boxes.buttons) {
+          assert.ok(button.width>=28);
+          assert.ok(button.right<=boxes.card.left || button.bottom<=boxes.card.top || button.top>=boxes.card.bottom);
+        }
+        if(width===600) assert.ok(boxes.buttons.every(button=>button.top>=boxes.card.top && button.bottom<=boxes.card.bottom));
+      };
+      for(const width of [600,375,320]) await checkPreviewLayout(width);
+      await checkPreviewLayout(600);
+      // Even long text plus media stays within the fixed two-line card.
+      await page.evaluate(()=>fixtureTweetStore.updateNotifications({'111':{id_str:'111',user:'me',
+        full_text:('整理任务，集中处理通知。\n').repeat(30)+' https://t.co/media',
+        extended_entities:{media:[{type:'photo',url:'https://t.co/media'},{type:'photo'}]}}}));
+      await firstCard.locator('.xqc-reply-text').filter({hasText:'图片 2 张'}).waitFor();
+      assert.equal((await firstCard.innerText()).includes('https://t.co/media'),false);
+      assert.equal(await firstCard.locator('.xqc-reply-text').evaluate(el=>getComputedStyle(el).textOverflow),'ellipsis');
+      assert.equal(await firstCard.evaluate(el=>el.getBoundingClientRect().height),40);
       // New data enriches the card, but never switches to conversation_id_str.
       await page.evaluate(()=>fixtureTweetStore.updateNotifications({'777':{id_str:'777',user:'me',in_reply_to_status_id_str:'111',full_text:'<img src=x onerror=alert(1)> 这是直接回复对象'}}));
       await missingCard.locator('.xqc-reply-label').filter({hasText:'回复你的评论'}).waitFor();
       assert.equal(await missingCard.getAttribute('href'),'/owner/status/777');
       assert.match(await missingCard.locator('.xqc-reply-text').innerText(),/<img src=x/);
       assert.equal(await missingCard.locator('img').count(),0);
-      assert.equal(await firstCard.locator('.xqc-reply-text').evaluate(el=>getComputedStyle(el).webkitLineClamp),'2');
       if(process.env.XQC_PREVIEW_SCREENSHOT) await page.screenshot({path:process.env.XQC_PREVIEW_SCREENSHOT});
-      // Preserve the link default (including modifiers); suppress only the
-      // surrounding notification's click. The test cancels actual navigation.
+      // Normal activation must use X's main router, without reloading the
+      // document, opening the sidebar or triggering the enclosing reply.
+      await page.evaluate(()=>{window.fixturePreviewDocument=document;});
       await firstCard.evaluate(link=>{
         link.addEventListener('click',event=>{
           window.fixturePreviewLinkDefault=!event.defaultPrevented;
@@ -395,8 +427,22 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         });
       });
       await firstCard.click();
-      assert.equal(await page.evaluate(()=>fixturePreviewLinkDefault),true);
+      await page.waitForFunction(()=>fixtureMainHistory.location.pathname==='/owner/status/111');
+      assert.equal(await page.evaluate(()=>fixturePreviewLinkDefault),false);
+      assert.equal(await page.evaluate(()=>fixturePreviewDocument===document),true);
+      assert.equal(await page.locator('#xqc-native-panel .xqc-root').innerText(),'');
       assert.equal(await page.evaluate(()=>window.fixtureNativeNotificationClicks||0),0);
+      await page.evaluate(()=>fixtureMainHistory.goBack());
+      await firstCard.waitFor();
+      const unmodifiedIndex=await page.evaluate(()=>fixtureMainHistory.index);
+      const defaults=await firstCard.evaluate(link=>['ctrlKey','metaKey','shiftKey','altKey','middle'].map(modifier=>{
+        let allowed=false;
+        link.addEventListener('click',event=>{allowed=!event.defaultPrevented;event.preventDefault();},{once:true});
+        link.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,...(modifier==='middle'?{button:1}:{[modifier]:true})}));
+        return allowed;
+      }));
+      assert.deepEqual(defaults,[true,true,true,true,true]);
+      assert.equal(await page.evaluate(()=>fixtureMainHistory.index),unmodifiedIndex);
       await page.locator('[data-notification-id="222"]').getByRole('button',{name:'Like notification'}).click();
       assert.equal(await page.evaluate(()=>fixtureNotificationLikes),1);
       // Virtualized row reuse must replace the old reply target, not duplicate it.
@@ -414,6 +460,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       await page.locator('[data-notification-id="333"] .xqc-reply-context').waitFor();
       await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
       assert.equal(await page.locator('.xqc-reply-context').count(),0);
+      assert.equal(await page.locator('.xqc-reply-actions').count(),0);
       assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),previewSubscribers);
     }
     // Freeze the sidebar's 3-second recovery so a rebuild cannot mask a lost
