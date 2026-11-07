@@ -374,6 +374,29 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       assert.equal(await firstCard.getAttribute('title'),null);
       assert.match(await firstCard.innerText(),/今天分享一个提高工作效率的方法/);
       assert.equal(await firstCard.getAttribute('href'),null);
+      // Native composer overlays retain the timeline but change the browser
+      // URL. Background store updates must not remove/recreate preview rows.
+      const beforeModal=await firstCard.evaluate(card=>{
+        window.fixtureRetainedPreview=card;
+        return card.closest('article').getBoundingClientRect().height;
+      });
+      await page.evaluate(()=>{
+        window.history.replaceState({},'', '/compose/post');
+        const overlay=document.createElement('div');overlay.id='preview-compose-overlay';
+        overlay.setAttribute('role','dialog');document.body.append(overlay);
+        fixtureTweetStore.updateNotifications({'111':{id_str:'111',isDeleted:true}});
+      });
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      assert.equal(await firstCard.evaluate(card=>card===fixtureRetainedPreview),true);
+      assert.equal(await firstCard.evaluate(card=>card.closest('article').getBoundingClientRect().height),beforeModal);
+      await page.evaluate(()=>{
+        fixtureTweetStore.updateNotifications({'111':{id_str:'111',user:'me',full_text:'今天分享一个提高工作效率的方法。先整理任务，再集中处理通知。'}});
+        window.history.replaceState({},'', '/notifications');
+        document.getElementById('preview-compose-overlay').remove();
+      });
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      assert.equal(await firstCard.evaluate(card=>card===fixtureRetainedPreview),true);
+      assert.equal(await firstCard.evaluate(card=>card.closest('article').getBoundingClientRect().height),beforeModal);
       const commentCard=page.locator('[data-notification-id="333"] .xqc-reply-context');
       assert.equal(await commentCard.locator('.xqc-reply-label').innerText(),'原帖：');
       assert.equal(await commentCard.getAttribute('href'),null);
