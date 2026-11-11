@@ -81,6 +81,10 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       const fakeStore={getState:()=>storeState,subscribe:fn=>{listeners.add(fn);return ()=>listeners.delete(fn);},
         dispatch:action=>{storeState={...storeState,timelineRevision:action.revision};for(const fn of [...listeners])fn();return action;},
         subscriberCount:()=>listeners.size,
+        updateBadge:badgeCount=>{
+          storeState={...storeState,badgeCount};
+          for(const fn of [...listeners])fn();
+        },
         updateNotifications:(tweets,ids)=>{
           storeState={...storeState,notificationIds:ids || storeState.notificationIds,
             entities:{...storeState.entities,tweets:{entities:{...storeState.entities.tweets.entities,...tweets}}}};
@@ -88,24 +92,72 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         },
         setFavorited:value=>{storeState.entities.tweets.entities['123456789'].favorited=value;for(const fn of listeners)fn();}};
       window.fixtureTweetStore=fakeStore;
+      const imageSrc='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="#7796ad"/></svg>');
+      const photoImage=()=>R.createElement('div',{'data-testid':'tweetPhoto'},R.createElement('img',{src:imageSrc,alt:'Fixture photo'}));
+      function notificationPhoto(id,index) {
+        const path='/alice/status/'+id+'/photo/'+index;
+        return R.createElement('a',{key:index,href:path,onClick:event=>{
+          event.preventDefault();event.stopPropagation();
+          window.fixtureOpenedPhoto=path;
+          window.history.pushState({},'',path);
+        }},photoImage());
+      }
       function NotificationRows(){
         const state=Redux.d4(state=>state),history=RR.useHistory();
         return state.notificationIds.map((id,index)=>R.createElement('article',{'data-testid':'tweet','data-notification-id':id,key:index,onClick:()=>{
           window.fixtureNativeNotificationClicks=(window.fixtureNativeNotificationClicks||0)+1;history.push('/alice/status/'+id);
         },style:{padding:'16px',borderBottom:'1px solid #ddd'}},
-          R.createElement('div',{'data-testid':'quoteTweet'},R.createElement('a',{href:'/quoted/status/987'},R.createElement('time',null,'Quoted time'))),
+          R.createElement('div',{'data-testid':'quoteTweet',style:{position:'relative'}},
+            R.createElement('a',{href:'/quoted/status/987'},R.createElement('time',null,'Quoted time')),
+            id==='444' && R.createElement(R.Fragment,null,
+              R.createElement('div',{'data-testid':'tweetText'},'这段引用正文应该保留'),
+              R.createElement('div',{'data-fixture-quote-spacer':true,'aria-hidden':true,style:{paddingBottom:'135%'}}),
+              R.createElement('div',{style:{position:'absolute',bottom:0}},notificationPhoto('987',1)))),
+          R.createElement('div',{'data-testid':'User-Name'},R.createElement('a',{href:'/alice'},'Alice')),
           R.createElement('a',{href:'/alice/status/'+id},R.createElement('time',null,'通知 · 刚刚')),
           R.createElement('div',{'data-testid':'tweetText'},state.entities.tweets.entities[id]?.full_text),
+          id==='222'?R.createElement('div',{'data-fixture-media-frame':true,style:{height:100,border:'1px solid'}},notificationPhoto(id,1)):null,
+          id==='333'?R.createElement('div',{'data-fixture-mixed-frame':true,style:{minHeight:520,position:'relative'}},
+            R.createElement('div',{'data-fixture-media-frame':true,style:{height:100}},notificationPhoto(id,1),notificationPhoto(id,2)),
+            R.createElement('div',{'data-testid':'card.wrapper'},'Link preview')):null,
+          id==='555' && R.createElement(R.Fragment,null,
+            R.createElement('div',{'data-fixture-attachment-spacer':true,style:{height:360},'aria-hidden':true}),
+            R.createElement('div',{'data-testid':'card.wrapper'},'Attachment preview')),
           R.createElement('div',{role:'group',style:{display:'flex',justifyContent:'space-between',maxWidth:425,marginTop:12}},
-            ...[['reply','♡',3],['retweet','⇄',1],['like','♥',8],['views','▥',12],['bookmark','♧',''],['share','↥','']].map(([testId,icon,count])=>
+            ...[['reply',3],['retweet',1],['like',8],['views',12],['bookmark',''],['share','']].map(([testId,count])=>
               R.createElement('div',{key:testId,style:{flex:1}},R.createElement('button',{'data-testid':testId,'aria-label':testId==='like'?'Like notification':testId,
                 style:{border:0,background:'transparent',padding:4,minWidth:28,color:'#536471'},
-                onClick:event=>{event.stopPropagation();if(testId==='like')window.fixtureNotificationLikes=(window.fixtureNotificationLikes||0)+1;}},icon+' '+count))))));
+                onClick:event=>{
+                  event.stopPropagation();
+                  if(testId==='like')window.fixtureNotificationLikes=(window.fixtureNotificationLikes||0)+1;
+                  if(testId==='retweet')window.fixtureNotificationReposts=(window.fixtureNotificationReposts||0)+1;
+                  if(testId==='reply')window.fixtureNativeHistory.push({pathname:'/compose/post',state:{inReplyToStatusId:id}});
+                }},R.createElement('svg',{width:16,height:16,'aria-hidden':true},R.createElement('circle',{cx:8,cy:8,r:5})),String(count)))))));
+      }
+      function HomeComposer(){
+        const {pathname}=RR.useLocation();
+        const [ready,setReady]=R.useState(false);
+        window.fixtureSetComposerReady=setReady;
+        if(pathname!=='/home')return null;
+        if(ready) return R.createElement(R.Fragment,null,
+          R.createElement('div',{role:'region'},R.createElement('textarea',{'data-testid':'tweetTextarea_0',defaultValue:'Saved inline draft'})),
+          R.createElement('div',{role:'region',id:'fixture-loaded-toolbar'},R.createElement('div',{'data-testid':'toolBar'},R.createElement('button',null,'Media'))));
+        return R.createElement('div',{id:'fixture-composer-placeholder'},
+          R.createElement('span',{'data-testid':'UserAvatar-Container-viewer'},R.createElement('img',{src:imageSrc,alt:''})),
+          R.createElement('div',null,...Array.from({length:6},(_,index)=>R.createElement('button',{key:index,disabled:true},
+            R.createElement('svg',{width:16,height:16},R.createElement('circle',{cx:8,cy:8,r:5}))))));
       }
       function NotificationsContent(){const [count,set]=R.useState(0);R.useEffect(()=>{mounts++;window.notificationMounts=mounts;},[]);return R.createElement('main',null,R.createElement('section',{'data-testid':'primaryColumn'},
+        R.createElement(HomeComposer),
         R.createElement('button',{id:'increment',onClick:()=>set(count+1)},'count '+count),
         R.createElement('output',{id:'main-store-state'},Redux.d4(state=>state.timelineRevision)),
-        R.createElement(NotificationRows),
+        R.createElement('div',{id:'fixture-timeline',style:{maxWidth:600,marginInline:'auto'}},
+          R.createElement(NotificationRows),
+          R.createElement('div',{id:'fixture-activity','data-testid':'notification',role:'button',onClick:()=>window.fixtureActivityClicked=true},
+            R.createElement('div',{'data-fixture-notification-glyph':true,style:{height:34}},
+              R.createElement('svg',{'data-testid':'icon-heart',width:26,height:26,style:{color:'#ff167d'}},R.createElement('circle',{cx:13,cy:13,r:11,fill:'currentColor'}))),
+            R.createElement('div',{'data-testid':'notificationText'},'Alice 喜欢了你的回复'),
+            R.createElement('div',null,'原有通知内容'))),
         ...['alice','bob','broken','hanging','slow','updates'].map(name=>R.createElement('a',{href:'/'+name,key:name},R.createElement('span',{'data-testid':'UserAvatar-Container-'+name},name)))));}
       // Real connect() inserts a nested subscription into the context copied
       // by the sidebar. Unmounting its owner must not strand the sidebar.
@@ -172,6 +224,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
           R.createElement('a',{href:'/bob/photo'},R.createElement('span',{'data-testid':'UserAvatar-Container-bob'},'bob avatar')),
           R.createElement('div',{'data-testid':'tweet'},
             R.createElement('a',{href:'/'+params.screenName+'/status/123456789'},'tweet time'),
+            R.createElement(NativeLink,{to:{pathname:'/'+params.screenName+'/status/123456789/photo/1',state:{fixturePhoto:true}}},photoImage()),
             R.createElement('button',{'data-testid':'like',id:'fixture-like',onClick:()=>fakeStore.setFavorited(true)},
               R.createElement('svg',{width:16,height:16},R.createElement('path',{d:'M1 1h10v10H1z'})),'Like')),
           R.createElement(RepostMenu),
@@ -525,6 +578,212 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       await page.locator('#xqc-native-panel article h2').filter({hasText:'bob shared-context'}).waitFor();
       await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
     }
+    await page.evaluate(()=>{
+      fixtureTweetStore.updateNotifications({},['222','333','444','555']);
+      window.history.replaceState({},'','/notifications');
+      fixtureMainHistory.push('/notifications');
+    });
+    const script=fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8');
+    await page.evaluate(script);
+    const theme=page.getByLabel('外观',{exact:true});
+    const account=page.getByRole('button',{name:'账户和外观'});
+    const firstPost=page.locator('[data-notification-id="222"]');
+    const secondPost=page.locator('[data-notification-id="333"]');
+    const attachmentPost=page.locator('[data-notification-id="555"]');
+    const quotedPost=page.locator('[data-notification-id="444"]');
+    const quote=quotedPost.locator('[data-testid="quoteTweet"]');
+    assert.ok(await quote.evaluate(node=>node.offsetHeight>500));
+    const timeline=page.locator('#fixture-timeline');
+    assert.equal(await timeline.evaluate(node=>node.offsetWidth),600);
+    await page.locator('#app main').evaluate(el=>el.style.minHeight='1800px');
+    await secondPost.evaluate(el=>scrollTo(0,el.getBoundingClientRect().top+scrollY-55));
+    const anchoredTop=await secondPost.evaluate(el=>el.getBoundingClientRect().top);
+    await theme.selectOption('codex');
+    assert.ok(Math.abs(await secondPost.evaluate(el=>el.getBoundingClientRect().top)-anchoredTop)<2);
+    assert.equal(await page.locator('html').getAttribute('data-xqc-theme'),'codex');
+    const activity=page.locator('#fixture-activity');
+    const unread=page.locator('#xqc-workspace a[href="/notifications"][data-xqc-unread]');
+    const railBell=page.locator('#xqc-workspace .xqc-icon-rail a[href="/notifications"]');
+    assert.equal(await activity.locator('.xqc-notification-mark').isVisible(),true);
+    assert.equal(await activity.locator('[data-fixture-notification-glyph]').isHidden(),true);
+    assert.equal(await activity.getByText('Alice 喜欢了你的回复').isVisible(),true);
+    assert.equal(await page.locator('#xqc-workspace .xqc-composer').isHidden(),true);
+    await activity.click();
+    assert.equal(await page.evaluate(()=>window.fixtureActivityClicked),true);
+    await page.evaluate(()=>fixtureTweetStore.updateBadge({remote:{badgeCounts:{ntab_unread_count:2},requestedAt:50}}));
+    await page.waitForFunction(()=>document.querySelectorAll('#xqc-workspace a[data-xqc-unread]').length===2);
+    assert.equal(await railBell.evaluate(link=>getComputedStyle(link,'::after').width),'7px');
+    await page.evaluate(()=>fixtureTweetStore.updateBadge({remote:{badgeCounts:{ntab_unread_count:2},requestedAt:50},ntabClearedAt:60}));
+    await unread.first().waitFor({state:'detached'});
+    await page.evaluate(()=>{
+      const header=document.createElement('header');
+      header.setAttribute('role','banner');
+      header.style.position='absolute';
+      header.innerHTML='<a href="/home">首页</a><a id="fixture-native-notifications" data-testid="AppTabBar_Notifications_Link" href="/notifications" aria-label="通知，3 条未读">通知</a><a data-testid="AppTabBar_Profile_Link" href="/owner">Profile</a><button data-testid="SideNav_AccountSwitcher_Button"><img alt=""></button>';
+      header.querySelector('img').src='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#5b738d"/></svg>');
+      header.querySelector('[data-testid="AppTabBar_Profile_Link"]').onclick=event=>{event.preventDefault();window.fixtureProfileMenuClicked=true;};
+      document.body.append(header);
+      header.querySelector('#fixture-native-notifications').onclick=event=>{
+        event.preventDefault();
+        history.replaceState({},'','/notifications');
+        fixtureMainHistory.push('/notifications');
+        event.currentTarget.setAttribute('aria-label','通知');
+      };
+      history.replaceState({},'','/home');
+      fixtureMainHistory.push('/home');
+    });
+    await page.waitForFunction(()=>document.querySelectorAll('#xqc-workspace a[data-xqc-unread]').length===2 && !document.documentElement.hasAttribute('data-xqc-notifications'));
+    assert.equal(await activity.locator('.xqc-notification-mark').count(),0);
+    const placeholder=page.locator('#fixture-composer-placeholder');
+    await placeholder.waitFor({state:'attached'});
+    assert.equal(await placeholder.isHidden(),true);
+    const jumpRail=page.getByRole('navigation',{name:'帖子快速跳转'});
+    const targetJump=jumpRail.getByRole('button',{name:/谢谢，我也这样做/});
+    assert.equal(await jumpRail.isVisible(),true);
+    const jumpRight=await jumpRail.evaluate(node=>node.getBoundingClientRect().right);
+    const readingLeft=await page.locator('#app [data-testid="primaryColumn"]').evaluate(node=>node.getBoundingClientRect().left);
+    assert.ok(Math.abs(jumpRight-readingLeft)<2);
+    await targetJump.click();
+    await page.waitForFunction(()=>{
+      const row=document.querySelector('[data-notification-id="333"]');
+      return Math.abs(row.getBoundingClientRect().top-63)<2;
+    });
+    assert.equal(await targetJump.getAttribute('aria-current'),'true');
+    assert.ok(await account.evaluate(node=>node.querySelector('img').naturalWidth>0));
+    assert.ok(await account.evaluate(node=>innerHeight-node.getBoundingClientRect().bottom<25));
+    await account.click();
+    assert.equal(await theme.isVisible(),true);
+    await page.keyboard.press('Escape');
+    assert.equal(await account.getAttribute('aria-expanded'),'false');
+    await account.click();
+    await page.getByRole('link',{name:'个人主页',exact:true}).click();
+    assert.equal(await page.evaluate(()=>window.fixtureProfileMenuClicked),true);
+    assert.equal(await account.getAttribute('aria-expanded'),'false');
+    await page.evaluate(()=>fixtureSetComposerReady(true));
+    const splitToolbar=page.locator('#fixture-loaded-toolbar');
+    await splitToolbar.waitFor({state:'attached'});
+    await splitToolbar.waitFor({state:'hidden'});
+    await page.getByRole('link',{name:'撰写帖子'}).click();
+    assert.equal(await splitToolbar.isVisible(),true);
+    assert.equal(await page.locator('[data-testid="tweetTextarea_0"]').inputValue(),'Saved inline draft');
+    await page.setViewportSize({width:390,height:900});
+    assert.equal(await railBell.isVisible(),true);
+    assert.equal(await railBell.getAttribute('aria-label'),'通知，有未读');
+    await railBell.click();
+    await unread.first().waitFor({state:'detached'});
+    await page.waitForURL('https://x.com/notifications');
+    await page.setViewportSize({width:1400,height:900});
+    await page.evaluate(()=>document.querySelector('#fixture-native-notifications').parentElement.remove());
+    await activity.locator('.xqc-notification-mark').waitFor();
+    assert.equal(await page.locator('#xqc-native-panel').isHidden(),true);
+    assert.equal(await firstPost.locator('[data-testid="tweetPhoto"]').isHidden(),true);
+    assert.equal(await firstPost.locator('[data-fixture-media-frame]').isHidden(),true);
+    assert.equal(await quote.locator('[data-fixture-quote-spacer]').isHidden(),true);
+    assert.ok(await quote.evaluate(node=>node.offsetHeight<100));
+    assert.equal(await quote.getByText('这段引用正文应该保留').isVisible(),true);
+    const thumbnail=firstPost.getByRole('link',{name:'查看图片',exact:true});
+    assert.equal(await thumbnail.isVisible(),true);
+    assert.equal(await firstPost.getByRole('button',{name:'附件',exact:true}).count(),0);
+    await page.waitForFunction(()=>document.querySelector('[data-notification-id="222"] .xqc-photo-preview img')?.naturalWidth>0);
+    const photoPlacement=await thumbnail.evaluate(link=>{
+      const post=link.closest('article').getBoundingClientRect();
+      const thumb=link.getBoundingClientRect();
+      return {width:thumb.width,gap:post.right-thumb.right};
+    });
+    assert.ok(photoPlacement.width>=90 && photoPlacement.width<=100);
+    assert.ok(photoPlacement.gap>=10 && photoPlacement.gap<=14);
+    assert.ok(await timeline.evaluate(node=>node.offsetWidth>750));
+    assert.equal(await firstPost.locator('.xqc-post-mark').count(),1);
+    for(const action of ['reply','retweet','like']) {
+      const button=firstPost.locator(`[data-testid="${action}"]`);
+      assert.equal(await button.isVisible(),true);
+      assert.equal(await button.locator('.xqc-action-icon').isVisible(),true);
+      assert.equal(await button.locator('[data-xqc-native-action-icon]').isHidden(),true);
+    }
+    assert.equal(await firstPost.locator('[data-testid="views"]').isHidden(),true);
+    const likeCount=await page.evaluate(()=>window.fixtureNotificationLikes || 0);
+    await firstPost.getByRole('button',{name:'Like notification'}).click();
+    await firstPost.getByRole('button',{name:'retweet',exact:true}).click();
+    assert.equal(await page.evaluate(()=>window.fixtureNotificationLikes),likeCount+1);
+    assert.equal(await page.evaluate(()=>window.fixtureNotificationReposts),1);
+    await thumbnail.click();
+    await page.waitForURL('https://x.com/alice/status/222/photo/1');
+    assert.equal(await page.evaluate(()=>window.fixtureOpenedPhoto),'/alice/status/222/photo/1');
+    assert.equal(await page.locator('html').getAttribute('data-xqc-theme'),'codex');
+    assert.equal(await page.evaluate(()=>fixtureMainHistory.location.pathname),'/notifications');
+    await page.evaluate(()=>history.back());
+    await page.waitForURL('https://x.com/notifications');
+    await quotedPost.getByRole('link',{name:'查看图片',exact:true}).click();
+    await page.waitForURL('https://x.com/alice/status/987/photo/1');
+    assert.equal(await page.evaluate(()=>window.fixtureOpenedPhoto),'/alice/status/987/photo/1');
+    await page.evaluate(()=>history.back());
+    await page.waitForURL('https://x.com/notifications');
+    const gallery=secondPost.getByRole('link',{name:'查看图片（2 张）'});
+    assert.equal(await gallery.innerText(),'+1');
+    const mixedFrame=secondPost.locator('[data-fixture-mixed-frame]');
+    assert.equal(await mixedFrame.isHidden(),true);
+    const bodyToActions=await secondPost.evaluate(post=>
+      post.querySelector('[role="group"]').getBoundingClientRect().top-post.querySelector('[data-testid="tweetText"]').getBoundingClientRect().bottom);
+    assert.ok(bodyToActions<60);
+    const attachmentSpacer=attachmentPost.locator('[data-fixture-attachment-spacer]');
+    assert.equal(await attachmentSpacer.isHidden(),true);
+    assert.equal(await secondPost.locator('[data-testid="card.wrapper"]').isHidden(),true);
+    await secondPost.getByRole('button',{name:'附件',exact:true}).click();
+    assert.equal(await mixedFrame.isVisible(),true);
+    assert.equal(await secondPost.locator('[data-testid="card.wrapper"]').isVisible(),true);
+    assert.equal(await secondPost.locator('[data-fixture-media-frame]').isHidden(),true);
+    await secondPost.getByRole('button',{name:'收起附件'}).click();
+    assert.equal(await mixedFrame.isHidden(),true);
+    await attachmentPost.getByRole('button',{name:'附件',exact:true}).click();
+    assert.equal(await attachmentPost.getByText('Attachment preview').isVisible(),true);
+    assert.equal(await attachmentSpacer.isVisible(),true);
+    await attachmentPost.getByRole('button',{name:'收起附件'}).click();
+    await firstPost.getByRole('button',{name:'更多',exact:true}).click();
+    assert.equal(await firstPost.locator('[data-testid="views"]').isVisible(),true);
+    await firstPost.getByRole('button',{name:'收起操作'}).click();
+    await firstPost.getByRole('button',{name:'reply',exact:true}).click();
+    const draft=page.locator('#native-modal #reply');
+    await draft.fill('Theme-switch draft');
+    assert.equal(await page.evaluate(()=>fixtureNativeHistory.location.state.inReplyToStatusId),'222');
+    await page.evaluate(()=>history.replaceState({},'','/compose/post'));
+    await theme.evaluate(select=>{select.value='native';select.dispatchEvent(new Event('change',{bubbles:true}));});
+    assert.equal(await draft.inputValue(),'Theme-switch draft');
+    assert.equal(await firstPost.locator('.xqc-tweet-tools').count(),0);
+    assert.equal(await firstPost.locator('.xqc-post-mark,.xqc-action-icon,[data-xqc-native-action-icon]').count(),0);
+    assert.equal(await timeline.evaluate(node=>node.offsetWidth),600);
+    assert.equal(await firstPost.locator('[data-testid="tweetPhoto"]').isVisible(),true);
+    assert.equal(await thumbnail.count(),0);
+    assert.ok(await quote.evaluate(node=>node.offsetHeight>500));
+    assert.equal(await mixedFrame.isVisible(),true);
+    assert.equal(await attachmentSpacer.isVisible(),true);
+    await theme.selectOption('codex');
+    assert.equal(await draft.inputValue(),'Theme-switch draft');
+    await page.locator('#close-compose').click();
+    await page.evaluate(()=>history.replaceState({},'','/notifications'));
+    await firstPost.getByRole('button',{name:'更多',exact:true}).click();
+    await page.evaluate(()=>fixtureTweetStore.updateNotifications({},['333','222','444','555']));
+    await page.waitForFunction(()=>document.querySelector('[data-notification-id="333"] .xqc-tweet-tools button[aria-label="更多"]'));
+    assert.equal(await secondPost.locator('[data-testid="reply"]').isVisible(),true);
+    assert.equal(await secondPost.locator('[data-testid="views"]').isHidden(),true);
+    await firstPost.getByRole('link',{name:'Alice'}).click();
+    await page.getByRole('heading',{name:'alice shared-context'}).waitFor();
+    await page.locator('#xqc-native-panel').getByRole('link',{name:'查看图片',exact:true}).click();
+    assert.equal(await page.evaluate(()=>fixtureNativeHistory.location.pathname),'/alice/status/123456789/photo/1');
+    assert.equal(await page.evaluate(()=>fixtureNativeHistory.location.state.fixturePhoto),true);
+    await page.evaluate(()=>fixtureNativeHistory.goBack());
+    await page.getByRole('button',{name:'关闭上下文'}).click();
+    assert.equal(await page.locator('#xqc-native-panel').isHidden(),true);
+    assert.equal(await theme.inputValue(),'codex');
+    await page.evaluate(()=>window.__xQuickComment());
+    assert.equal(await page.locator('html').getAttribute('data-xqc-theme'),null);
+    assert.equal(await page.locator('html').getAttribute('data-xqc-reading-jumps'),null);
+    assert.equal(await firstPost.locator('.xqc-tweet-tools').count(),0);
+    await page.evaluate(script);
+    assert.equal(await theme.inputValue(),'codex');
+    await account.click();
+    await theme.selectOption('native');
+    await page.evaluate(()=>window.__xQuickComment());
+    await page.locator('#app main').evaluate(el=>{el.style.minHeight='';scrollTo(0,0);});
     // Simulate a new X deployment that renumbers every module. Internal
     // dependencies still use the original fixture ids; the public runtime
     // surface exposed to the bookmarklet uses only the new ids.
@@ -548,6 +807,6 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
     assert.deepEqual(errors,[]);
     assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),baselineSubscribers);
-    console.log('PASS: direct-reply notification previews, missing/deleted data, recycled rows, native clicks and cleanup; independent subscriptions across main-page remounts; renumbered modules; native routing and composer; stalled timeline recovery. Real X DOM still requires live validation.');
+    console.log('PASS: notification previews and unread dots; native routing and recovery; Codex account menu, reading jumps, hidden composer chrome, native actions, drafts, and context. Real X DOM still requires live validation.');
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
