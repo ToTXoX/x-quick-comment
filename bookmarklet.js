@@ -14,7 +14,7 @@
   const host = document.createElement('section');
   host.id = 'xqc-native-panel';
   host.setAttribute('aria-label','𝕏侧栏 · 用户主页');
-  const version = '3.22';
+  const version = '3.24';
   host.dataset.version=version;
   host.innerHTML = `<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="25" height="25" fill="none"><rect x="6" y="9" width="52" height="46" rx="8" stroke="currentColor" stroke-width="5"/><path d="M23 11v42" stroke="currentColor" stroke-width="5"/><path d="M33 23h15M33 33h15M33 43h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></span><div><strong>𝕏侧栏</strong><span class="xqc-caption">整页刷新需要重新点击书签，开启侧边栏</span></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" aria-label="关闭𝕏侧栏" title="关闭𝕏侧栏">×</button></div></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 动态书签自动获取更新</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
   const style = document.createElement('style');
@@ -55,8 +55,10 @@
   const previewCards=new Map();
   const previewObserver=new MutationObserver(records=>{
     const owned=node=>node instanceof Element && (host.contains(node) || node.closest('.xqc-reply-context'));
-    if(records.some(record=>!owned(record.target) &&
-      (record.type!=='childList' || [...record.addedNodes,...record.removedNodes].some(node=>!owned(node))))) schedulePreviews();
+    const changes=records.filter(record=>!owned(record.target) &&
+      (record.type!=='childList' || [...record.addedNodes,...record.removedNodes].some(node=>!owned(node))));
+    if(changes.length) schedulePreviews();
+    if(changes.some(record=>record.type==='childList')) scheduleSearchPosition();
   });
   style.textContent+=`
     .xqc-reply-context{display:block;box-sizing:border-box;max-width:100%;min-width:0;margin:3px 0 0;padding:0;border:0;background:none;color:inherit;opacity:.4;text-decoration:none;font:12px/18px system-ui;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -225,6 +227,9 @@
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('click', onPanelLink);
     window.removeEventListener('resize', position);
+    window.removeEventListener('scroll', scheduleSearchPosition, true);
+    searchResizeObserver.disconnect();
+    if (searchFrame) cancelAnimationFrame(searchFrame);
     layerObserver.disconnect(); observer?.disconnect(); unlistenTweets?.();
     if (likeFrame) cancelAnimationFrame(likeFrame);
     root?.unmount(); memory?.destroy?.(); restoreNavigationConfig?.();
@@ -245,24 +250,78 @@
     // main contains BOTH primaryColumn and sidebarColumn.
     return pageElement('[data-testid="primaryColumn"]') || pageElement('main');
   }
+  function sidebarColumn() {
+    return pageElement('[data-testid="sidebarColumn"]') || pageElement('main aside');
+  }
+  let searchFrame = 0, observedSearch, observedSuggestions;
+  const searchResizeObserver = new ResizeObserver(scheduleSearchPosition);
+  function scheduleSearchPosition() {
+    if (disposed || searchFrame) return;
+    searchFrame = requestAnimationFrame(() => {
+      searchFrame = 0;
+      positionBelowSearch();
+    });
+  }
+  function positionBelowSearch(sidebar = sidebarColumn()) {
+    const search = sidebar?.querySelector('[role="search"]');
+    const input = search?.querySelector('[role="combobox"]');
+    const suggestionsId = input?.getAttribute('aria-owns') || input?.getAttribute('aria-controls');
+    const dropdown = suggestionsId && document.getElementById(suggestionsId);
+    // Desktop X renders suggestions inside the search form, below the input.
+    // Native popups mounted in #layers already stack above the panel.
+    const suggestions = search?.contains(dropdown || null) ? dropdown : undefined;
+    if (search !== observedSearch || suggestions !== observedSuggestions) {
+      searchResizeObserver.disconnect();
+      if (search) searchResizeObserver.observe(search);
+      if (suggestions) searchResizeObserver.observe(suggestions);
+      observedSearch = search;
+      observedSuggestions = suggestions;
+    }
+    const panel = host.getBoundingClientRect();
+    const viewportHeight = document.documentElement.clientHeight;
+    const box = search?.getBoundingClientRect();
+    const overlaps = box?.width && box.height && box.right > panel.left && box.left < panel.right &&
+      box.bottom > 0 && box.top < viewportHeight && getComputedStyle(search).visibility === 'visible';
+    const top = overlaps ? Math.min(viewportHeight, Math.ceil(box.bottom) + 4) : 0;
+    host.style.top = top ? `${top}px` : '';
+    host.style.clipPath = searchSuggestionClip(suggestions, panel, top);
+  }
+  function searchSuggestionClip(suggestions, panel, panelTop) {
+    if (!suggestions || getComputedStyle(suggestions).visibility !== 'visible') return '';
+    const rect = suggestions.getBoundingClientRect();
+    const left = Math.max(0, rect.left - panel.left);
+    const right = Math.min(panel.width, rect.right - panel.left);
+    const top = Math.max(0, rect.top - panelTop);
+    const bottom = Math.min(panel.bottom, rect.bottom) - panelTop;
+    if (right <= left || bottom <= top) return '';
+    // The inline dropdown sits inside X's stacking contexts. A hole in the
+    // panel reveals it and passes clicks through without moving the native DOM.
+    // Extend the outer polygon past the panel so its shadow remains visible.
+    const outer = '-64px -64px, calc(100% + 64px) -64px, calc(100% + 64px) calc(100% + 64px), -64px calc(100% + 64px), -64px -64px';
+    return `polygon(evenodd, ${outer}, ${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px, ${left}px ${top}px)`;
+  }
   let widthWarning = false;
   function position() {
     const primary = pageElement('[data-testid="primaryColumn"]');
-    const sidebar = pageElement('[data-testid="sidebarColumn"]') || pageElement('main aside');
+    const sidebar = sidebarColumn();
     const edge = primary?.getBoundingClientRect().right ??
       sidebar?.getBoundingClientRect().left ?? mainColumn()?.getBoundingClientRect().right;
     const available = edge == null ? 0 : document.documentElement.clientWidth - edge;
     if (available < 280) {
       host.style.width = 'min(380px, 95vw)';
+      positionBelowSearch(sidebar);
       widthWarning = true;
       report('右侧空间不足。请缩小浏览器缩放比例，使主栏右侧至少留出 280px。');
       return false;
     }
     host.style.width = `${available}px`;
+    positionBelowSearch(sidebar);
     if (widthWarning) { widthWarning = false; report('右侧空间已恢复。请点击用户头像。'); }
     return true;
   }
-  window.addEventListener('resize', position); position();
+  window.addEventListener('resize', position);
+  window.addEventListener('scroll', scheduleSearchPosition, {capture:true,passive:true});
+  position();
   function fiberOf(node) {
     const name = Object.keys(node).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactContainer$'));
     return name && node[name];
@@ -553,7 +612,7 @@
     if (disposed || !supportedPage() ||
         !(event.target instanceof Element) || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const target=event.target, link=target.closest('a[href]');
-    if(host.contains(target)) return;
+    if(host.contains(target) || target.closest('[role="search"]')) return;
     if (!target.closest('main, [data-testid="primaryColumn"]') || !link) return;
     const avatar='[data-testid^="UserAvatar-Container"],[data-testid="Tweet-User-Avatar"],img[src*="/profile_images/"],img[src*="/default_profile"]';
     if (!target.closest(avatar) && !link.querySelector(avatar)) return;

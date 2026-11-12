@@ -256,7 +256,60 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         R.createElement(StoreContext.Provider,{value:{store:fakeStore,history:nativeHistory,viewerUserId:'me'}},appTree)));
     });
     await page.locator('#increment').click();
+    await page.evaluate(()=>{
+      const sidebar=document.createElement('aside');
+      sidebar.dataset.testid='sidebarColumn';
+      sidebar.style.cssText='position:absolute;top:8px;right:32px;width:320px;z-index:1';
+      sidebar.innerHTML='<form role="search" style="position:relative;height:44px">'+
+        '<input aria-label="Search X" role="combobox" aria-owns="typeaheadDropdown-fixture" style="width:95%;height:36px"></form>';
+      const search=sidebar.querySelector('form');
+      search.querySelector('input').addEventListener('focus',()=>{
+        const suggestions=document.createElement('div');
+        suggestions.id='typeaheadDropdown-fixture';
+        suggestions.style.cssText='position:absolute;top:100%;width:100%;height:170px;background:white;display:flex;align-items:end';
+        const result=document.createElement('a');
+        result.href='/searchresult';
+        result.innerHTML='<span data-testid="UserAvatar-Container-searchresult">Use search suggestion</span>';
+        result.onclick=event=>{event.preventDefault();search.dataset.selected='true';suggestions.remove();};
+        suggestions.append(result);
+        search.append(suggestions);
+      });
+      document.body.style.minHeight='1400px';
+      document.querySelector('#app main').append(sidebar);
+    });
     await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    const search=page.getByRole('combobox',{name:'Search X'});
+    const panel=page.locator('#xqc-native-panel');
+    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel').getBoundingClientRect().top >=
+      document.querySelector('[role="search"]').getBoundingClientRect().bottom);
+    const panelTop=(await panel.boundingBox()).y;
+    await search.click({timeout:2000});
+    await search.fill('fixture query');
+    assert.equal(await search.inputValue(),'fixture query');
+    const suggestions=page.locator('#typeaheadDropdown-fixture');
+    await suggestions.evaluate(el=>el.style.height='230px');
+    await page.waitForFunction(()=>{
+      const popup=document.querySelector('#typeaheadDropdown-fixture');
+      const panel=document.querySelector('#xqc-native-panel');
+      const popupRect=popup.getBoundingClientRect();
+      const panelRect=panel.getBoundingClientRect();
+      const insideY=popupRect.bottom-10;
+      return popup.contains(document.elementFromPoint(popupRect.left+10,insideY)) &&
+        panel.contains(document.elementFromPoint(panelRect.left+10,insideY)) &&
+        panel.contains(document.elementFromPoint(popupRect.left+10,popupRect.bottom+10));
+    });
+    assert.equal((await panel.boundingBox()).y,panelTop);
+    await page.getByRole('link',{name:'Use search suggestion'}).click({timeout:2000});
+    assert.equal(await page.locator('[role="search"]').getAttribute('data-selected'),'true');
+    await page.waitForFunction(()=>!document.querySelector('#xqc-native-panel').style.clipPath);
+    assert.equal((await panel.boundingBox()).y,panelTop);
+    await page.evaluate(()=>window.scrollTo(0,100));
+    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel').getBoundingClientRect().top===0);
+    await page.evaluate(()=>window.scrollTo(0,0));
+    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel').getBoundingClientRect().top>0);
+    await page.locator('aside[data-testid="sidebarColumn"]').evaluate(el=>{el.remove();document.body.style.minHeight='';});
+    await page.waitForFunction(()=>document.querySelector('#xqc-native-panel').getBoundingClientRect().top===0);
+    assert.equal(await panel.isVisible(),true);
     await page.locator('#app [data-testid="UserAvatar-Container-alice"]').click();
     await page.getByRole('heading',{name:'alice shared-context'}).waitFor({timeout:3000}).catch(async e=>{console.error(await page.locator('#xqc-native-panel').innerText());throw e;});
     assert.equal(await page.locator('#xqc-native-panel #context-route').innerText(),'/alice');
@@ -548,6 +601,6 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
     assert.deepEqual(errors,[]);
     assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),baselineSubscribers);
-    console.log('PASS: direct-reply notification previews, missing/deleted data, recycled rows, native clicks and cleanup; independent subscriptions across main-page remounts; renumbered modules; native routing and composer; stalled timeline recovery. Real X DOM still requires live validation.');
+    console.log('PASS: native sidebar search and suggestions; direct-reply notification previews, missing/deleted data, recycled rows, native clicks and cleanup; independent subscriptions across main-page remounts; renumbered modules; native routing and composer; stalled timeline recovery. Real X DOM still requires live validation.');
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
