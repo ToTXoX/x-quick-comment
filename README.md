@@ -1,34 +1,49 @@
-# 𝕏侧栏
+<p align="center">
+  <img src="docs/readme-mark.svg" width="72" height="72" alt="X 侧栏图标">
+</p>
+<h1 align="center">𝕏 侧栏</h1>
+<p align="center">左侧看时间线，右侧看用户主页。</p>
+<p align="center">
+  <a href="https://x.usdts.de/"><img alt="安装 X 侧栏" src="https://img.shields.io/badge/INSTALL-X_SIDEBAR-0969DA?style=for-the-badge"></a>
+  <a href="#安装与使用"><img alt="浏览器书签" src="https://img.shields.io/badge/BOOKMARKLET-X-171515?style=for-the-badge&amp;logo=x"></a>
+  <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/LICENSE-MIT-57606A?style=for-the-badge"></a>
+</p>
 
-在 X 主页、通知页、用户主页或帖子页点击头像，右侧查看用户主页。通知里的评论正文下方常显“原帖”摘要，方便辨认它回复的是哪条帖子或评论。回复、转发、引用沿用 X 原生操作。
+## 功能
 
-## 安装
+| 功能 | 说明 |
+| --- | --- |
+| **头像侧栏** | 点头像查看用户主页，支持 X 原生回复、转发和引用。 |
+| **评论通知** | 原帖已加载时，在评论下方显示摘要。 |
+| **原生搜索** | 搜索建议浮在侧栏上方，侧栏保持原位。 |
 
-打开本仓库的 `index.html`，把「开启x侧栏」拖到浏览器收藏栏。也可以下载带图标的收藏夹文件并导入；运行 `node build.mjs` 可重新生成安装页和收藏夹文件。
+## 安装与使用
 
-打开已登录的 `https://x.com/home`、`https://x.com/notifications`、用户主页（如 `https://x.com/MengShi63540`）或帖子页（如 `https://x.com/MengShi63540/status/2118335318088876326`），点击收藏栏里的「开启x侧栏」，再点击页面中的用户头像。刷新网页后需要重新点击书签。
+1. 在电脑浏览器打开安装页，把 **开启x侧栏** 拖到收藏栏。[打开安装页](https://x.usdts.de/)
+2. 登录 X 后点击书签。[X 首页](https://x.com/home) · [通知页](https://x.com/notifications)
+3. 点用户头像打开侧栏。支持首页、通知页、用户主页和帖子页。
 
-动态书签会短暂打开 `x.usdts.de`，由安装页读取 GitHub 仓库 `main` 分支上的最新版脚本，再交给 X 页面执行。如果 GitHub 暂时不可用，则使用官网安装页内置的版本。用户只需将旧书签替换为动态书签一次；以后仓库更新不需要重新安装。此功能需要允许弹窗，并信任本仓库与官网发布的代码在已登录的 X 页面运行。
+刷新页面后需重新点书签。也可通过书签管理器导入。[下载书签文件](https://x.usdts.de/x-quick-comment-bookmarks.html)
 
-帖子 3 秒内没有出现时，侧栏会自动重建并重试。重建后再等 4 秒仍未加载时，可点击「重试侧栏」或「在 X 中打开」。
-侧栏顶部的「重新加载侧栏」按钮可重新加载当前用户主页。
+<details>
+<summary><strong>常见问题</strong></summary>
 
-开启书签后，通知页会在可识别的评论正文下方显示一行淡色“原帖：摘要”，过长时省略，不添加底色、边框、装饰线，也不占用操作栏空间。没有原帖内容时不显示摘要，数据随后到达会自动补全。它读取 X 当前页面的数据，不额外抓取帖子。摘要为更淡的普通文字，没有独立链接或点击处理，点击沿用外层通知卡片的原生行为。通知正文和时间链接保持 X 原来的行为，不被侧栏接管。关闭增强功能会移除卡片、释放订阅。
+- **如何更新？** 动态书签会短暂打开安装页，从 `main` 加载脚本，失败时使用内置版本。
+- **书签点了没反应？** 在 X 页面允许弹窗后重试。
+- **侧栏没加载或空间不足？** 加载卡住时点 **↻** 重试，空间不足时拉宽窗口。
 
-侧栏通过独立的状态订阅读取 X 的共享数据，避免主页面组件重新挂载后，侧栏收不到帖子更新而持续显示加载中。关闭侧栏会释放自己的订阅。
+</details>
 
-## 源码
+## 开发与测试
 
-- `bookmarklet.js`：侧栏脚本。
-- `loader-bookmarklet.js`：安装后保存在浏览器里的动态启动书签。
-- `home.template.html`：安装页模板；`build.mjs` 生成 `index.html` 和 `x-quick-comment-bookmarks.html`。
-- `favicon.svg` / `favicon.png`：侧栏图标。
-- `x-split-link.user.js`：早期油猴分屏方案，当前安装页不使用。
+```sh
+node build.mjs
+node test-dynamic-loader.cjs
+node test-native-adapter.cjs
+```
 
-运行 `node test-dynamic-loader.cjs` 可测试动态加载与 X 的内容安全策略；运行 `node test-native-adapter.cjs` 可测试原生路由适配。测试需要本地 Chromium 与 X bundle 测试资源（默认 `%TEMP%/xqc-local-test`）。由于 X 的内部页面结构可能变化，真实页面仍需安装后验证。
+测试需要 Chromium 和 X bundle，默认从 `%TEMP%/xqc-local-test` 读取，可用 `XQC_TEST_ASSETS` 指定目录。
 
-导航配置隔离测试还使用该目录中的 `x-app-modules.js`，来自当前登录页面的 `loader.AppModules.76aa056a34182eb8a.js`，以 X 的真实配置队列验证侧栏预填文字不会进入主页面发帖入口。
+---
 
-## 许可
-
-本项目采用 [MIT 许可证](LICENSE)。
+[反馈问题](https://github.com/ToTXoX/x-quick-comment/issues)
