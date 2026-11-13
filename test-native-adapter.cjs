@@ -434,6 +434,44 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await page.locator('#xqc-native-panel').isVisible(),true);
     assert.equal(await page.locator('#native-modal #reply').count(),0);
     assert.equal(await page.evaluate(()=>notificationMounts),1);
+    if (startPath==='/home') {
+      // Simulate native modal navigation and an imprecise scroll restoration.
+      await page.evaluate(()=>{
+        document.body.style.minHeight='1600px';
+        document.querySelector('#app main').style.paddingTop='250px';
+        window.scrollTo(0,180);
+        const reply=document.querySelector('[data-notification-id="222"] [data-testid="reply"]');
+        reply.addEventListener('click',()=>{
+          history.pushState({},'', '/compose/post');
+          const modal=document.createElement('button');
+          modal.id='fixture-home-send';
+          modal.textContent='Send reply';
+          modal.style.cssText='position:fixed;top:30px;left:30px';
+          modal.onclick=()=>{
+            history.replaceState({},'', '/home');
+            modal.remove();
+            requestAnimationFrame(()=>{
+              window.scrollBy(0,-12);
+              window.fixtureHomeReplySent=true;
+            });
+          };
+          document.body.append(modal);
+        },{once:true});
+      });
+      const post=page.locator('[data-notification-id="222"]');
+      const before=(await post.boundingBox()).y;
+      await post.locator('[data-testid="reply"]').click();
+      await page.waitForURL('**/compose/post');
+      await page.locator('#fixture-home-send').click();
+      await page.waitForURL('**/home');
+      await page.waitForFunction(top=>window.fixtureHomeReplySent &&
+        Math.abs(document.querySelector('[data-notification-id="222"]').getBoundingClientRect().top-top)<1,before,{timeout:3000});
+      await page.evaluate(()=>{
+        document.body.style.minHeight='';
+        document.querySelector('#app main').style.paddingTop='';
+        window.scrollTo(0,0);
+      });
+    }
     // Native reply buttons carry their target in history state, not just the URL.
     await page.locator('#reply-state').click();
     await page.locator('#native-modal #reply').waitFor();

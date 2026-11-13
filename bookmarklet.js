@@ -51,7 +51,7 @@
   if (!supportedPage()) {
     alert('请打开 X 首页、通知页、用户主页或帖子页，再点击 Peekala 书签'); return;
   }
-  const version = '3.67';
+  const version = '3.68';
   const peekalaMark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <path fill="#b8b6b3" d="M41 46c-4 2-7 3-11 2-2 0-3 2-1 4 3 3 8 4 12 2l4-3zm5 7c-1 3 0 5-2 7-1 2 1 3 3 2 4-1 6-5 7-9z"/>
   <path fill="#d8d5d2" d="M40 38h15v18c-4 2-10 3-13-1-3-4-2-11-2-17z"/>
@@ -2140,12 +2140,14 @@
     let tweetStore, unlistenTweets, likeFrame = 0;
     let sidebarScope, restoreNavigationConfig;
     let previewStore, unlistenPreviews, previewFrame=0;
+    let homeReply, homeReplyFrame=0;
+    const isCompose=path=>/^\/(?:compose(?:\/|$)|intent\/(?:post|tweet)(?:\/|$))/.test(path);
     const previewCards=new Map();
     const previewObserver=new MutationObserver(records=>{
       const owned=node=>node instanceof Element && (host.contains(node) || controls.contains(node) || node.closest('.xqc-reply-context,.xqc-like-effect'));
       const changes=records.filter(record=>!owned(record.target) &&
         (record.type!=='childList' || [...record.addedNodes,...record.removedNodes].some(node=>!owned(node))));
-      if(changes.length) schedulePreviews();
+      if(changes.length) onPageUpdate();
       if(changes.some(record=>record.type==='childList')) scheduleSearchPosition();
     });
     style.textContent+=`
@@ -2154,6 +2156,39 @@
     function schedulePreviews() {
       if(disposed || previewFrame) return;
       previewFrame=requestAnimationFrame(()=>{previewFrame=0;syncPreviews();});
+    }
+    function onPageUpdate() {
+      schedulePreviews();
+      if (!homeReply) return;
+      if (!homeReply.opened && performance.now()>homeReply.deadline) {
+        homeReply=undefined;
+        return;
+      }
+      if (isCompose(location.pathname)) {
+        homeReply.opened=true;
+        return;
+      }
+      if (location.href!==homeReply.url) {
+        homeReply=undefined;
+        return;
+      }
+      if (!homeReply.opened || homeReplyFrame) return;
+      // Give X's modal teardown and native scroll restoration time to finish.
+      homeReplyFrame=requestAnimationFrame(()=>{
+        homeReplyFrame=requestAnimationFrame(()=>{
+          homeReplyFrame=0;
+          const reply=homeReply;
+          homeReply=undefined;
+          if (disposed || !reply || location.href!==reply.url) return;
+          const main=mainColumn();
+          const article=main?.contains(reply.article) && tweetId(reply.article)===reply.id
+            ? reply.article
+            : [...main?.querySelectorAll('[data-testid="tweet"]') || []].find(node=>tweetId(node)===reply.id);
+          if (!article) return;
+          const offset=article.getBoundingClientRect().top-reply.top;
+          if (Math.abs(offset)>=1 && Math.abs(offset)<=80) window.scrollBy({top:offset,behavior:'instant'});
+        });
+      });
     }
     function clearPreviews() {
       for(const {card} of previewCards.values()) card.remove();
@@ -2164,7 +2199,7 @@
       // X keeps the notification timeline mounted behind its composer while
       // changing the URL. Preserve its row heights until the modal closes so
       // native scroll restoration uses the same layout it saved on entry.
-      if(/^\/(?:compose(?:\/|$)|intent\/(?:post|tweet)(?:\/|$))/.test(location.pathname) &&
+      if(isCompose(location.pathname) &&
         [...previewCards.keys()].some(article=>article.isConnected)) return;
       if(!/^\/notifications(?:\/|$)/.test(location.pathname)) {
         clearPreviews();unlistenPreviews?.();unlistenPreviews=previewStore=undefined;return;
@@ -2310,7 +2345,8 @@
       disposed = true; clearTimeout(timeout);
       previewObserver.disconnect();unlistenPreviews?.();
       if(previewFrame) cancelAnimationFrame(previewFrame);
-      window.removeEventListener('popstate',schedulePreviews);clearPreviews();
+      window.removeEventListener('popstate',onPageUpdate);clearPreviews();
+      cancelAnimationFrame(homeReplyFrame);
       document.removeEventListener('click', onClick, true);
       for (const [tweet,stop] of likeEffects) if (host.contains(tweet)) stop();
       document.removeEventListener('click', onPanelLink);
@@ -2610,7 +2646,6 @@
       // Compose must be owned by AppShell: its header, dismiss flow, and submit
       // controls depend on the primary route/modal providers. Never mount a second
       // composer in the copied route tree or copy/call a submit handler ourselves.
-      const isCompose=path=>/^\/(?:compose(?:\/|$)|intent\/(?:post|tweet)(?:\/|$))/.test(path);
       for(const method of ['push','replace']) {
         const navigate=memory[method];
         memory[method]=(path,state)=>{
@@ -2703,6 +2738,15 @@
       if (disposed || !supportedPage() ||
           !(event.target instanceof Element) || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
       const target=event.target, link=target.closest('a[href]');
+      if (location.pathname==='/home' && target.closest('[data-testid="reply"]')) {
+        const article=target.closest('[data-testid="tweet"]');
+        const id=tweetId(article);
+        if (id && mainColumn()?.contains(article)) {
+          cancelAnimationFrame(homeReplyFrame);
+          homeReplyFrame=0;
+          homeReply={url:location.href,article,id,top:article.getBoundingClientRect().top,deadline:performance.now()+2000};
+        }
+      }
       if(host.contains(target) || target.closest('[role="search"]')) return;
       if (!target.closest('main, [data-testid="primaryColumn"]') || !link) return;
       const avatar='[data-testid^="UserAvatar-Container"],[data-testid="Tweet-User-Avatar"],img[src*="/profile_images/"],img[src*="/default_profile"]';
@@ -2725,7 +2769,7 @@
     document.addEventListener('click', onPanelLink);
     document.addEventListener('click', onClick, true);
     previewObserver.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['href']});
-    window.addEventListener('popstate',schedulePreviews);
+    window.addEventListener('popstate',onPageUpdate);
     schedulePreviews();
     if (!widthWarning) report('点击左侧头像，查看用户主页。');
     return clean;
