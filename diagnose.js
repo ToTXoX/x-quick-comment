@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const host=document.getElementById('xqc-native-panel');
-  if(!host){alert('请先启用双栏书签并点击头像，出现错误后再点“读取双栏错误”。');return;}
+  if(!host){alert('请先启用 Peekala 书签并点击头像，出现错误后再点“Peekala 侧栏诊断”。');return;}
   const mount=host.querySelector('.xqc-root');
   const key=mount&&Object.keys(mount).find(k=>k.startsWith('__reactContainer$'));
   const raw=key&&mount[key], root=raw?.stateNode?.current||raw;
@@ -29,7 +29,7 @@
     if(props?.path)for(const p of [].concat(props.path))if(typeof p==='string')paths.add(p);
     if(f.child)stack.push(f.child);if(f.sibling)stack.push(f.sibling);
   }
-  const text=['双栏诊断 v1','右侧 React 根：'+Boolean(root),'扫描组件：'+visited,
+  const text=['Peekala 侧栏诊断 v1','右侧 React 根：'+Boolean(root),'扫描组件：'+visited,
     '错误边界：'+(boundaries.join(', ')||'无'),
     '路径模板：'+([...paths].slice(0,15).join(', ')||'无'),
     ...(found.length?found.slice(0,4):['原生错误边界没有保留可读取的异常；还不能确定具体原因。'])].join('\n\n');

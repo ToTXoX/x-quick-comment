@@ -11,7 +11,10 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
   try {
     const page=await browser.newPage({viewport:{width:1400,height:900}});
     const errors=[]; page.on('pageerror',e=>errors.push(e.message));
-    await page.route('https://x.com/**',route=>route.fulfill({contentType:'text/html',body:'<style>body{margin:0}main{width:1400px}[data-testid=primaryColumn]{width:800px}</style><div id="app"></div>'}));
+    await page.route('https://x.com/**',route=>route.fulfill({
+      headers:{'content-security-policy':"img-src 'self' data: blob: https://*.twimg.com"},
+      contentType:'text/html',body:'<style>body{margin:0}main{width:1400px}[data-testid=primaryColumn]{width:800px}</style><div id="app"></div>'
+    }));
     const startPath=process.env.XQC_TEST_START_PATH || '/notifications';
     await page.goto('https://x.com'+startPath);
     await page.evaluate(()=>{
@@ -72,7 +75,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         users:{entities:{me:{id_str:'me',screen_name:'owner'},alice:{id_str:'alice',screen_name:'alice'}}},
         tweets:{entities:{'123456789':{favorited:false},
           '111':{id_str:'111',user:'me',full_text:'今天分享一个提高工作效率的方法。先整理任务，再集中处理通知。'},
-          '222':{id_str:'222',user:'alice',full_text:'这个方法很有用',in_reply_to_status_id_str:'111',in_reply_to_user_id_str:'me',in_reply_to_screen_name:'owner',conversation_id_str:'111'},
+          '222':{id_str:'222',user:'alice',favorited:false,full_text:'这个方法很有用',in_reply_to_status_id_str:'111',in_reply_to_user_id_str:'me',in_reply_to_screen_name:'owner',conversation_id_str:'111'},
           '333':{id_str:'333',user:'me',full_text:'谢谢，我也这样做',in_reply_to_status_id_str:'222',in_reply_to_user_id_str:'alice',in_reply_to_screen_name:'alice',conversation_id_str:'111'},
           '444':{id_str:'444',full_text:'有一个补充问题',in_reply_to_status_id_str:'777',conversation_id_str:'111'},
           '555':{id_str:'555',full_text:'This is a quote, not a reply',quoted_status:'111'}
@@ -97,10 +100,19 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
           R.createElement('a',{href:'/alice/status/'+id},R.createElement('time',null,'通知 · 刚刚')),
           R.createElement('div',{'data-testid':'tweetText'},state.entities.tweets.entities[id]?.full_text),
           R.createElement('div',{role:'group',style:{display:'flex',justifyContent:'space-between',maxWidth:425,marginTop:12}},
-            ...[['reply','♡',3],['retweet','⇄',1],['like','♥',8],['views','▥',12],['bookmark','♧',''],['share','↥','']].map(([testId,icon,count])=>
-              R.createElement('div',{key:testId,style:{flex:1}},R.createElement('button',{'data-testid':testId,'aria-label':testId==='like'?'Like notification':testId,
+            ...[['reply','♡',3],['retweet','⇄',1],['like','♥',8],['views','▥',12],['bookmark','♧',''],['share','↥','']].map(([testId,icon,count])=>{
+              const tweet=state.entities.tweets.entities[id];
+              const liked=testId==='like' && tweet.favorited;
+              return R.createElement('div',{key:testId,style:{flex:1}},R.createElement('button',{key:liked?'unlike':testId,
+                'data-testid':liked?'unlike':testId,'aria-label':testId==='like'?(liked?'Unlike notification':'Like notification'):testId,
                 style:{border:0,background:'transparent',padding:4,minWidth:28,color:'#536471'},
-                onClick:event=>{event.stopPropagation();if(testId==='like')window.fixtureNotificationLikes=(window.fixtureNotificationLikes||0)+1;}},icon+' '+count))))));
+                onClick:event=>{
+                  event.stopPropagation();
+                  if(testId!=='like')return;
+                  if(!liked)window.fixtureNotificationLikes=(window.fixtureNotificationLikes||0)+1;
+                  fakeStore.updateNotifications({[id]:{...tweet,favorited:!liked}});
+                }},icon+' '+count));
+            }))));
       }
       function NotificationsContent(){const [count,set]=R.useState(0);R.useEffect(()=>{mounts++;window.notificationMounts=mounts;},[]);return R.createElement('main',null,R.createElement('section',{'data-testid':'primaryColumn'},
         R.createElement('button',{id:'increment',onClick:()=>set(count+1)},'count '+count),
@@ -277,7 +289,27 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       document.body.style.minHeight='1400px';
       document.querySelector('#app main').append(sidebar);
     });
-    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    const source=fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8');
+    const featureMenu=page.getByRole('group',{name:'Peekala 功能开关'});
+    const buddy=page.getByRole('button',{name:'展开 Peekala 侧栏'});
+    const closeSidebar=page.getByRole('button',{name:'关闭 Peekala 侧栏'});
+    const exit=page.getByRole('button',{name:'退出 Peekala'});
+    const effectsSwitch=featureMenu.getByRole('switch',{name:'点赞特效',exact:true});
+    const playEffect=featureMenu.getByRole('button',{name:'播放当前点赞特效'});
+    const headerEffect=featureMenu.locator('.xqc-like-effect');
+    await page.evaluate(source);
+    await featureMenu.waitFor();
+    assert.equal(await featureMenu.evaluate(el=>el.parentElement.matches('#xqc-native-panel > header > .xqc-actions')),true);
+    const refreshButton=page.getByRole('button',{name:'重新加载侧栏'});
+    const switchBounds=await featureMenu.boundingBox();
+    const refreshBounds=await refreshButton.boundingBox();
+    assert.ok(switchBounds.x+switchBounds.width < refreshBounds.x);
+    assert.ok(Math.abs(switchBounds.y+switchBounds.height/2-refreshBounds.y-refreshBounds.height/2)<1);
+    assert.equal(await featureMenu.getByRole('switch').count(),1);
+    assert.equal(await buddy.isVisible(),false);
+    assert.equal(await effectsSwitch.isChecked(),true);
+    await page.evaluate(source);
+    assert.equal(await effectsSwitch.evaluate(el=>el===document.activeElement),true);
     const search=page.getByRole('combobox',{name:'Search X'});
     const panel=page.locator('#xqc-native-panel');
     await page.waitForFunction(()=>document.querySelector('#xqc-native-panel').getBoundingClientRect().top >=
@@ -316,13 +348,43 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.waitForFunction(()=>document.querySelector('#xqc-native-panel>[role=status]')?.hidden);
     await page.locator('#app [data-testid="UserAvatar-Container-alice"]').click();
     assert.equal(await page.locator('#xqc-native-panel>[role=status]').isHidden(),true);
-    await page.locator('#xqc-native-panel #fixture-like').click();
+    const likeEffect=page.locator('.xqc-like-effect');
+    const likeSticker=likeEffect.locator('img');
+    const panelLike=page.locator('#xqc-native-panel #fixture-like');
+    await panelLike.click();
     await page.waitForFunction(()=>document.querySelector('#xqc-native-panel #fixture-like')?.classList.contains('xqc-liked-from-store'));
     assert.equal(await page.locator('#xqc-native-panel #fixture-like svg').evaluate(el=>getComputedStyle(el).color),'rgb(249, 24, 128)');
     assert.equal(await page.locator('#xqc-native-panel #fixture-like').getAttribute('data-testid'),'like');
     assert.equal(await page.evaluate(()=>fixtureTweetStore.getState().entities.tweets.entities['123456789'].favorited),true);
+    await page.waitForFunction(()=>document.querySelector('.xqc-like-effect img')?.naturalWidth===64);
+    const firstSticker=await likeSticker.getAttribute('src');
+    const iconBounds=await panelLike.locator('svg').boundingBox();
+    const effectBounds=await likeEffect.boundingBox();
+    assert.equal(effectBounds.x,iconBounds.x+iconBounds.width/2);
+    assert.equal(effectBounds.y,iconBounds.y+iconBounds.height/2);
+    await likeEffect.waitFor({state:'detached'});
+    assert.equal(await panelLike.locator('svg').evaluate(el=>getComputedStyle(el).visibility),'visible');
     await page.evaluate(()=>fixtureTweetStore.setFavorited(false));
     await page.waitForFunction(()=>!document.querySelector('#xqc-native-panel #fixture-like')?.classList.contains('xqc-liked-from-store'));
+    await panelLike.press('Enter');
+    await likeSticker.waitFor();
+    assert.notEqual(await likeSticker.getAttribute('src'),firstSticker);
+    await page.evaluate(()=>fixtureTweetStore.setFavorited(false));
+    await likeEffect.waitFor({state:'detached'});
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await panelLike.click();
+    await page.waitForFunction(()=>document.querySelector('#fixture-like')?.classList.contains('xqc-liked-from-store'));
+    assert.equal(await likeEffect.count(),0);
+    await page.evaluate(()=>fixtureTweetStore.setFavorited(false));
+    await page.emulateMedia({reducedMotion:'no-preference'});
+    await page.waitForFunction(()=>!document.querySelector('#fixture-like')?.classList.contains('xqc-liked-from-store'));
+    await effectsSwitch.uncheck();
+    assert.equal(await panel.isVisible(),true);
+    await panelLike.click();
+    await page.waitForFunction(()=>document.querySelector('#fixture-like')?.classList.contains('xqc-liked-from-store'));
+    assert.equal(await likeEffect.count(),0);
+    await page.evaluate(()=>fixtureTweetStore.setFavorited(false));
+    await effectsSwitch.check();
     assert.deepEqual(JSON.parse(await page.locator('#query').innerText()),{search:''});
     await page.locator('#filter').click();
     assert.deepEqual(JSON.parse(await page.locator('#query').innerText()),{filter:'photo',sort:'popular',search:'?filter=photo&sort=popular'});
@@ -342,12 +404,12 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await page.locator('#xqc-native-panel .xqc-footer a[aria-label="dk021 的 X 主页"]').getAttribute('href'),'https://x.com/yygqdkqk');
     assert.equal((await page.locator('#xqc-native-panel .xqc-footer').innerText()).includes('by dk021'),false);
     assert.equal(await page.locator('#xqc-native-panel .xqc-footer-links a svg').count(),2);
-    assert.equal(await page.locator('#xqc-native-panel .xqc-actions button').count(),2);
+    assert.equal(await page.locator('#xqc-native-panel .xqc-actions > button').count(),2);
     assert.equal(await page.locator('#xqc-native-panel .xqc-footer-links a').first().evaluate(el=>getComputedStyle(el).width),'22px');
     assert.equal(await page.locator('#xqc-native-panel .xqc-version').innerText(),
       'v'+await page.locator('#xqc-native-panel').getAttribute('data-version'));
     assert.match((await page.locator('#xqc-native-panel .xqc-footer-note').innerText()).replace(/\s+/g,''),/动态书签自动获取更新/);
-    assert.match(await page.locator('#xqc-native-panel .xqc-caption').innerText(),/整页刷新需要重新点击书签，开启侧边栏/);
+    assert.equal(await page.locator('#xqc-native-panel .xqc-caption').innerText(),'刷新后点击书签恢复设置');
     await page.setViewportSize({width:1120,height:900});
     assert.equal(await page.locator('#xqc-native-panel>header').evaluate(el=>el.scrollWidth>el.clientWidth),false);
     assert.equal(await page.locator('#xqc-native-panel .xqc-footer').evaluate(el=>Math.round(el.getBoundingClientRect().bottom)),900);
@@ -418,7 +480,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.locator('#reply').waitFor();
     assert.equal(await page.locator('#reply').inputValue(),'@intentional saved text');
     await page.locator('#close-compose').click();
-    await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+    await closeSidebar.click();
     assert.equal(await page.evaluate(()=>fixtureNavigation.Configure===fixtureOriginalConfigure),true);
     assert.equal(await page.locator('#xqc-native-panel').count(),0);
     assert.equal(await page.locator('#layers').evaluate(el=>getComputedStyle(el).zIndex),'3');
@@ -426,7 +488,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await page.locator('#increment').innerText(),'count 3');
     if(/^\/notifications(?:\/|$)/.test(startPath)) {
       const previewSubscribers=await page.evaluate(()=>fixtureTweetStore.subscriberCount());
-      await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+      await buddy.click();
       const firstCard=page.locator('[data-notification-id="222"] .xqc-reply-context');
       await firstCard.waitFor();
       assert.equal(await firstCard.locator('.xqc-reply-label').innerText(),'原帖：');
@@ -495,6 +557,9 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       await firstCard.waitFor();
       await page.locator('[data-notification-id="222"]').getByRole('button',{name:'Like notification'}).click();
       assert.equal(await page.evaluate(()=>fixtureNotificationLikes),1);
+      await likeSticker.waitFor();
+      await page.locator('[data-notification-id="222"]').getByRole('button',{name:'Unlike notification'}).click();
+      await likeEffect.waitFor({state:'detached'});
       // Virtualized row reuse must replace the old reply target, not duplicate it.
       await page.evaluate(()=>fixtureTweetStore.updateNotifications({},['333','444','555']));
       await page.waitForFunction(()=>document.querySelector('[data-notification-id="333"] .xqc-reply-text')?.textContent==='这个方法很有用');
@@ -508,16 +573,23 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       assert.equal(await page.locator('#xqc-native-panel .xqc-root').innerText(),'');
       await page.evaluate(()=>fixtureMainHistory.goBack());
       await page.locator('[data-notification-id="333"] .xqc-reply-context').waitFor();
-      await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+      await closeSidebar.click();
       assert.equal(await page.locator('.xqc-reply-context').count(),0);
       assert.equal(await page.locator('.xqc-reply-actions').count(),0);
       assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),previewSubscribers);
+      assert.equal(await featureMenu.count(),0);
+      assert.equal(await buddy.isVisible(),true);
+      const mainLike=page.locator('[data-notification-id="333"]').getByRole('button',{name:'Like notification'});
+      await mainLike.click();
+      await likeSticker.waitFor();
+      assert.equal(await panel.count(),0);
+      await likeEffect.waitFor({state:'detached'});
     }
     // Freeze the sidebar's 3-second recovery so a rebuild cannot mask a lost
     // subscription. Both useSelector() and connect() must see completed data.
     await page.clock.install();
     const baselineSubscribers=await page.evaluate(()=>fixtureTweetStore.subscriberCount());
-    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    await buddy.click();
     await page.locator('#app [data-testid="UserAvatar-Container-updates"]').click();
     await page.locator('#xqc-native-panel [role=progressbar]').waitFor();
     for(const revision of [1,2]) {
@@ -533,11 +605,11 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       assert.equal(await page.locator('#xqc-native-panel [data-testid=tweet]').innerText(),'Loaded post '+revision);
       assert.equal(await page.evaluate(()=>storeProfileMounts),1);
     }
-    await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+    await closeSidebar.click();
     assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),baselineSubscribers);
     await page.evaluate(()=>fixtureTweetStore.dispatch({revision:3}));
     await page.waitForFunction(()=>document.querySelector('#main-store-state')?.textContent==='3');
-    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    await buddy.click();
     await page.locator('#app [data-testid="UserAvatar-Container-broken"]').click();
     const diagnostic=page.locator('#xqc-native-panel>[role=status]');
     await diagnostic.filter({hasText:'fixture: missing native profile context'}).waitFor();
@@ -545,9 +617,9 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.match(await diagnostic.innerText(),/BrokenProfile/);
     await page.locator('#app [data-testid="UserAvatar-Container-alice"]').click();
     assert.match(await diagnostic.innerText(),/fixture: missing native profile context/);
-    await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+    await closeSidebar.click();
     assert.deepEqual(errors,[]);
-    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    await buddy.click();
     await page.locator('#app [data-testid="UserAvatar-Container-slow"]').click();
     await page.locator('#xqc-native-panel [role=progressbar]').waitFor({state:'attached'});
     await page.clock.fastForward(3000);
@@ -556,8 +628,8 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.getByRole('heading',{name:'slow shared-context'}).waitFor();
     assert.equal(await page.evaluate(()=>window.slowMounts),2);
     assert.equal(await page.locator('#xqc-native-panel>[role=status]').isHidden(),true);
-    await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
-    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    await closeSidebar.click();
+    await buddy.click();
     await page.locator('#app [data-testid="UserAvatar-Container-hanging"]').click();
     await page.locator('#xqc-native-panel [role=progressbar]').waitFor({state:'attached'});
     await page.clock.fastForward(2000);
@@ -569,14 +641,14 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.clock.fastForward(4000);
     await page.getByRole('button',{name:'重试侧栏'}).waitFor();
     assert.equal(await page.locator('#xqc-native-panel>[role=status] a').getAttribute('href'),'/hanging');
-    await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+    await closeSidebar.click();
     for(const route of ['/MengShi63540','/MengShi63540/status/2118335318088876326']){
       await page.evaluate(path=>{window.history.replaceState({},'',path);fixtureMainHistory.push(path);},route);
       await page.locator('#app [data-testid="UserAvatar-Container-bob"]').waitFor();
-      await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+      await buddy.click();
       await page.locator('#app [data-testid="UserAvatar-Container-bob"]').click();
       await page.locator('#xqc-native-panel article h2').filter({hasText:'bob shared-context'}).waitFor();
-      await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+      await closeSidebar.click();
     }
     // Simulate a new X deployment that renumbers every module. Internal
     // dependencies still use the original fixture ids; the public runtime
@@ -595,12 +667,227 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       window.history.replaceState({},'','/notifications');
       fixtureMainHistory.push('/notifications');
     });
-    await page.evaluate(fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8'));
+    await buddy.click();
     await page.locator('#app [data-testid="UserAvatar-Container-alice"]').click();
     await page.getByRole('heading',{name:'alice shared-context'}).waitFor();
-    await page.getByRole('button',{name:'关闭𝕏侧栏'}).click();
+    await closeSidebar.click();
     assert.deepEqual(errors,[]);
     assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),baselineSubscribers);
-    console.log('PASS: native sidebar search and suggestions; direct-reply notification previews, missing/deleted data, recycled rows, native clicks and cleanup; independent subscriptions across main-page remounts; renumbered modules; native routing and composer; stalled timeline recovery. Real X DOM still requires live validation.');
+    const savedFeatures=JSON.parse(await page.evaluate(()=>localStorage.getItem('xqc-features')));
+    assert.deepEqual(savedFeatures,{likeEffects:true});
+    await page.evaluate(()=>localStorage.setItem('xqc-features',JSON.stringify({likeEffects:true,sidebar:false})));
+    await page.reload();
+    await page.evaluate(source);
+    assert.equal(await panel.isVisible(),true);
+    assert.equal(await buddy.isVisible(),false);
+    await page.evaluate(()=>{
+      document.querySelector('#app').innerHTML=`
+        <main data-testid="primaryColumn"><article data-testid="tweet">
+          <a href="/alice/status/123"><time>now</time></a>
+          <button id="sticker-like" data-testid="like">♥</button>
+        </article></main>`;
+      const button=document.querySelector('#sticker-like');
+      button.onclick=()=>button.dataset.testid=button.dataset.testid==='like'?'unlike':'like';
+    });
+    const manage=page.getByRole('button',{name:'管理点赞特效动画'});
+    const manager=page.getByRole('region',{name:'点赞特效',exact:true});
+    const builtInTile=manager.getByRole('button',{name:'冒冒探头，使用中'});
+    const fileInput=manager.locator('input[type=file]');
+    const preview=manager.locator('.xqc-like-effect img');
+    const tabs=manager.getByRole('tab');
+    const customTab=manager.getByRole('tab',{name:'自定义',exact:true});
+    const header=panel.locator('header').first();
+    const heightBefore=(await header.boundingBox()).height;
+    await manage.click();
+    await builtInTile.waitFor();
+    const activeSticker=manager.locator('[data-active-sticker]');
+    const activeThumbnail=manager.locator('[data-active-thumbnail]');
+    assert.equal(await activeSticker.textContent(),'冒冒探头');
+    await page.waitForFunction(()=>document.querySelector('[data-active-thumbnail]')?.naturalWidth===52);
+    const builtInTiles=manager.locator('.xqc-sticker-grid [data-sticker-id]');
+    assert.deepEqual(await builtInTiles.evaluateAll(tiles=>tiles.map(tile=>tile.getAttribute('aria-label'))),
+      ['冒冒探头，使用中','奶龙','老黄','老马','小肥鱼','大肥鱼']);
+    const originalThumbnail=await activeThumbnail.getAttribute('src');
+    await manager.getByRole('button',{name:'奶龙',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#xqc-sticker-manager .xqc-like-effect img')?.naturalWidth===48);
+    assert.equal(await activeSticker.textContent(),'冒冒探头');
+    assert.equal(await activeThumbnail.getAttribute('src'),originalThumbnail);
+    await manager.getByRole('button',{name:'使用此特效'}).click();
+    await manager.getByRole('button',{name:'奶龙，使用中'}).waitFor();
+    assert.equal(await activeSticker.textContent(),'奶龙');
+    assert.notEqual(await activeThumbnail.getAttribute('src'),originalThumbnail);
+    await manager.getByRole('button',{name:'老黄',exact:true}).click();
+    await page.waitForFunction(()=>{
+      const image=document.querySelector('#xqc-sticker-manager .xqc-like-effect img');
+      return image?.naturalWidth===64 && image.parentElement.style.getPropertyValue('--xqc-like-duration')==='1080ms';
+    });
+    await manager.getByRole('button',{name:'使用此特效'}).click();
+    await manager.getByRole('button',{name:'老黄，使用中'}).waitFor();
+    assert.equal(await activeSticker.textContent(),'老黄');
+    await manager.getByRole('button',{name:'老马',exact:true}).click();
+    await page.waitForFunction(()=>{
+      const image=document.querySelector('#xqc-sticker-manager .xqc-like-effect img');
+      return image?.naturalWidth===64 && image.parentElement.style.getPropertyValue('--xqc-like-duration')==='1170ms';
+    });
+    await manager.getByRole('button',{name:'使用此特效'}).click();
+    await manager.getByRole('button',{name:'老马，使用中'}).waitFor();
+    assert.equal(await activeSticker.textContent(),'老马');
+    const fishTile=manager.getByRole('button',{name:'小肥鱼',exact:true});
+    assert.equal(await fishTile.locator(':scope > img').evaluate(el=>getComputedStyle(el).width),'38px');
+    await fishTile.click();
+    await page.waitForFunction(()=>{
+      const image=document.querySelector('#xqc-sticker-manager .xqc-like-effect img');
+      return image?.naturalWidth===64 && getComputedStyle(image).width==='38px' &&
+        image.parentElement.style.getPropertyValue('--xqc-like-duration')==='1440ms';
+    });
+    await manager.getByRole('button',{name:'使用此特效'}).click();
+    await manager.getByRole('button',{name:'小肥鱼，使用中'}).waitFor();
+    assert.equal(await activeSticker.textContent(),'小肥鱼');
+    assert.equal(await activeThumbnail.evaluate(el=>getComputedStyle(el).width),'22px');
+    await page.locator('#sticker-like').click();
+    await manager.waitFor({state:'hidden'});
+    await page.waitForFunction(()=>{
+      const image=document.querySelector('.xqc-like-effect img');
+      return image?.naturalWidth===64 && getComputedStyle(image).width==='38px' &&
+        image.parentElement.style.getPropertyValue('--xqc-like-duration')==='1440ms';
+    });
+    await page.locator('#sticker-like').click();
+    await likeEffect.waitFor({state:'detached'});
+    await manage.click();
+    await manager.getByRole('button',{name:'大肥鱼',exact:true}).click();
+    await page.waitForFunction(()=>{
+      const image=document.querySelector('#xqc-sticker-manager .xqc-like-effect img');
+      return image?.naturalWidth===58 && getComputedStyle(image).width==='38px' &&
+        image.parentElement.style.getPropertyValue('--xqc-like-duration')==='1440ms';
+    });
+    await manager.getByRole('button',{name:'使用此特效'}).click();
+    await manager.getByRole('button',{name:'大肥鱼，使用中'}).waitFor();
+    assert.equal(await activeSticker.textContent(),'大肥鱼');
+    await manager.getByRole('button',{name:'冒冒探头',exact:true}).click();
+    await manager.getByRole('button',{name:'使用此特效'}).click();
+    await builtInTile.waitFor();
+    assert.equal(await manager.getByRole('button',{name:'新建表情包'}).count(),0);
+    assert.equal((await header.boundingBox()).height,heightBefore);
+    assert.equal(await manager.evaluate(el=>el.matches(':popover-open')),true);
+    const managerBounds=await manager.boundingBox();
+    const manageBounds=await manage.boundingBox();
+    assert.ok(managerBounds.y>=manageBounds.y+manageBounds.height);
+    await page.keyboard.press('Escape');
+    await manager.waitFor({state:'hidden'});
+    await manage.click();
+    assert.deepEqual(await tabs.allTextContents(),['系统内置','自定义']);
+    assert.equal(await manager.getByRole('button',{name:'上传 GIF',exact:true}).count(),0);
+    await customTab.click();
+    assert.equal(await activeSticker.textContent(),'冒冒探头');
+    assert.equal(await tabs.nth(1).getAttribute('aria-selected'),'true');
+    const upload=manager.getByRole('button',{name:'上传 GIF',exact:true});
+    assert.equal(await upload.evaluate(el=>el.parentElement===el.closest('ul').firstElementChild),true);
+    const [chooser]=await Promise.all([page.waitForEvent('filechooser'),upload.click()]);
+    assert.equal(await chooser.isMultiple(),false);
+    await fileInput.setInputFiles({name:'坏文件.gif',mimeType:'image/gif',buffer:Buffer.from('not a GIF')});
+    await manager.getByText('无法读取这张 GIF。').waitFor();
+    // Three frames with distinct delays and a loop extension.
+    const buffer=Buffer.from('R0lGODlhEAAKAIEAAPmEKAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQAGAAAACwAAAAAEAAKAAAIFwABCBxIsKDBgwgTKlzIsKHDhxAjHgwIACH5BAEkAAEALAAAAAAQAAoAgSCASgAAAAAAAAAAAAgXAAEIHEiwoMGDCBMqXMiwocOHECMeDAgAIfkEATIAAQAsAAAAABAACgCBVDO7AAAAAAAAAAAACBcAAQgcSLCgwYMIEypcyLChw4cQIx4MCAA7','base64');
+    await fileInput.setInputFiles({name:'我的小动画.gif',mimeType:'image/gif',buffer});
+    const custom=manager.getByRole('button',{name:/^我的小动画/});
+    assert.equal(await manager.getByRole('button',{name:'预览',exact:true}).count(),0);
+    await custom.click();
+    const removeCustom=manager.getByRole('button',{name:'删除 我的小动画',exact:true});
+    const tileBounds=await custom.boundingBox();
+    const removeBounds=await removeCustom.boundingBox();
+    assert.ok(removeBounds.x<tileBounds.x+tileBounds.width/2 && removeBounds.y<tileBounds.y+tileBounds.height/2);
+    await page.waitForFunction(()=>document.querySelector('#xqc-sticker-manager .xqc-like-effect img')?.naturalWidth===16);
+    assert.equal(await preview.evaluate(el=>el.parentElement.style.getPropertyValue('--xqc-like-duration')),'1100ms');
+    assert.equal(await preview.evaluate(async el=>(await (await fetch(el.src)).text()).includes('NETSCAPE2.0')),false);
+    assert.equal(await custom.getAttribute('aria-label'),'我的小动画');
+    await manager.getByRole('button',{name:'使用此特效'}).click();
+    await manager.getByRole('button',{name:'我的小动画，使用中'}).waitFor();
+    await manager.getByText('使用中',{exact:true}).waitFor();
+    await customTab.press('Home');
+    assert.equal(await custom.count(),0);
+    assert.equal(await tabs.first().getAttribute('aria-selected'),'true');
+    await tabs.first().press('ArrowRight');
+    await manager.getByRole('button',{name:'我的小动画，使用中'}).waitFor();
+    await customTab.press('ArrowLeft');
+    assert.equal(await manager.getByRole('button',{name:'上传 GIF',exact:true}).count(),0);
+    await page.keyboard.press('Escape');
+    await manager.waitFor({state:'hidden'});
+    await effectsSwitch.uncheck();
+    const tweetLike=page.locator('#sticker-like');
+    const likeState=await tweetLike.getAttribute('data-testid');
+    await playEffect.click();
+    const headerImage=headerEffect.locator('img');
+    await page.waitForFunction(()=>document.querySelector('#xqc-feature-controls .xqc-like-effect img')?.naturalWidth===16);
+    const headerSource=await headerImage.getAttribute('src');
+    await playEffect.press('Enter');
+    await playEffect.click();
+    assert.equal(await headerEffect.count(),1);
+    assert.notEqual(await headerImage.getAttribute('src'),headerSource);
+    assert.equal(await tweetLike.getAttribute('data-testid'),likeState);
+    await page.clock.runFor(1100);
+    await headerEffect.waitFor({state:'detached'});
+    await effectsSwitch.check();
+    await playEffect.click();
+    await headerImage.waitFor();
+    await closeSidebar.click();
+    await headerEffect.waitFor({state:'detached'});
+    await buddy.click();
+    await manage.click();
+    await page.locator('#sticker-like').click();
+    await manager.waitFor({state:'hidden'});
+    await page.waitForFunction(()=>document.querySelector('.xqc-like-effect img')?.naturalWidth===16);
+    await closeSidebar.click();
+    await page.mouse.move(20,20);
+    assert.equal(await exit.evaluate(el=>getComputedStyle(el).opacity),'0');
+    const buddyBounds=await buddy.boundingBox();
+    assert.ok(buddyBounds.width>60 && buddyBounds.width<70);
+    assert.equal(buddyBounds.x+buddyBounds.width,1400);
+    await buddy.hover();
+    assert.equal(await exit.evaluate(el=>getComputedStyle(el).opacity),'1');
+    await exit.click();
+    await likeEffect.waitFor({state:'detached'});
+    assert.equal(await buddy.count(),0);
+    assert.equal(await panel.count(),0);
+    assert.equal(await page.evaluate(()=>window.__xQuickComment),undefined);
+    await page.locator('#sticker-like').click();
+    await page.locator('#sticker-like').click();
+    await page.clock.runFor(100);
+    assert.equal(await likeEffect.count(),0);
+
+    await page.reload();
+    await page.evaluate(source);
+    assert.equal(await panel.isVisible(),true);
+    await manage.click();
+    await manager.getByRole('button',{name:'我的小动画，使用中'}).waitFor();
+    assert.deepEqual(await tabs.allTextContents(),['系统内置','自定义']);
+    assert.equal(await customTab.getAttribute('aria-selected'),'true');
+    await fileInput.setInputFiles({name:'单独删除.gif',mimeType:'image/gif',buffer});
+    const removeOther=manager.getByRole('button',{name:'删除 单独删除',exact:true});
+    await removeOther.waitFor();
+    const grid=manager.locator('.xqc-sticker-grid');
+    const gridBefore=await grid.boundingBox();
+    const confirmation=manager.getByRole('dialog');
+    await removeOther.click();
+    await confirmation.getByText('删除 GIF「单独删除」？').waitFor();
+    assert.equal(await confirmation.getByRole('button',{name:'继续'}).count(),0);
+    assert.deepEqual(await grid.boundingBox(),gridBefore);
+    await removeOther.waitFor();
+    await page.keyboard.press('Escape');
+    await confirmation.waitFor({state:'hidden'});
+    assert.equal(await manager.isVisible(),true);
+    await removeOther.click();
+    await confirmation.getByRole('button',{name:'删除',exact:true}).click();
+    await removeOther.waitFor({state:'detached'});
+    await manager.getByRole('button',{name:'我的小动画，使用中'}).waitFor();
+    await removeCustom.click();
+    await confirmation.getByText('删除 GIF「我的小动画」？').waitFor();
+    await confirmation.getByRole('button',{name:'删除',exact:true}).click();
+    await custom.waitFor({state:'detached'});
+    assert.equal(await activeSticker.textContent(),'冒冒探头');
+    await tabs.first().click();
+    await builtInTile.waitFor();
+    assert.deepEqual(await tabs.allTextContents(),['系统内置','自定义']);
+    assert.deepEqual(errors,[]);
+    console.log('PASS: two-tab GIF library, upload, preview, playback, persistence and deletion; switches, native sidebar search, reply previews, subscriptions, routing, composer and stalled timeline recovery. Real X DOM still requires live validation.');
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,7 +1,43 @@
 (() => {
   'use strict';
   if (location.origin !== 'https://x.com') {
-    alert('请打开 X 页面后，再点击书签开启侧边栏');
+    if (document.getElementById('peekala-redirect')) return;
+    const dialog=document.createElement('dialog');
+    dialog.id='peekala-redirect';
+    dialog.setAttribute('aria-labelledby','peekala-redirect-message');
+    const form=document.createElement('form');
+    form.method='dialog';
+    const message=document.createElement('p');
+    message.id='peekala-redirect-message';
+    message.textContent='跳转到你的 X 主页后，再点击本书签使用侧栏';
+    const actions=document.createElement('div');
+    Object.assign(dialog.style,{
+      boxSizing:'border-box',width:'min(380px, calc(100% - 32px))',maxWidth:'none',
+      padding:'22px',border:'1px solid #d6d1cb',borderRadius:'14px',
+      background:'Canvas',color:'CanvasText',font:'15px/1.6 system-ui',colorScheme:'light dark'
+    });
+    Object.assign(message.style,{margin:'0 0 18px'});
+    Object.assign(actions.style,{display:'flex',justifyContent:'flex-end',gap:'8px'});
+    for (const [label,value] of [['取消','cancel'],['跳转 x.com','go']]) {
+      const button=document.createElement('button');
+      button.type='submit';
+      button.value=value;
+      button.textContent=label;
+      button.autofocus=value==='cancel';
+      Object.assign(button.style,{
+        padding:'6px 13px',border:'1px solid CanvasText',borderRadius:'8px',font:'inherit',cursor:'pointer',
+        background:value==='go'?'CanvasText':'Canvas',color:value==='go'?'Canvas':'CanvasText'
+      });
+      actions.append(button);
+    }
+    form.append(message,actions);
+    dialog.append(form);
+    dialog.addEventListener('close',()=>{
+      dialog.remove();
+      if (dialog.returnValue==='go') location.assign('https://x.com/home');
+    },{once:true});
+    document.body.append(dialog);
+    dialog.showModal();
     return;
   }
   if (window.__xQuickComment) { window.__xQuickComment(); return; }
@@ -31,7 +67,7 @@
         data?.kind !== 'xqc-source' || data.token !== token) return;
     cleanup();
     if (typeof data.source !== 'string' || data.source.length < 1000 || data.source.length > 250000) {
-      alert('官网没有返回有效的侧栏脚本。请稍后重试。');
+      alert('官网没有返回有效的 Peekala 脚本。请稍后重试。');
       return;
     }
     const ack = '__xqcLoaderAck_' + token.replaceAll('-', '');

@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         X 通知头像 · 原生分屏联动
+// @name         Peekala 冒冒 · X 分屏联动
 // @namespace    local.x-split-link
 // @version      1.0.0
 // @description  手动分屏后，点击通知头像让指定的右侧 X 页面打开主页；保留原生页面交互。
@@ -40,7 +40,7 @@
     section{padding:0 12px 12px}p{margin:6px 0;overflow-wrap:anywhere}
     button{font:inherit;cursor:pointer;border:1px solid #8886;border-radius:6px;background:ButtonFace;color:ButtonText;padding:5px 8px;margin:4px 4px 0 0}
     [hidden]{display:none!important}.tip{color:GrayText;font-size:12px}
-  </style><details><summary>X 分屏联动 · <span id="role"></span></summary><section>
+  </style><details><summary>Peekala 分屏联动 · <span id="role"></span></summary><section>
     <p id="status" role="status"></p>
     <button id="receive">设为右侧接收页</button><button id="stop">停止接收</button>
     <button id="toggle">暂停头像联动</button>
