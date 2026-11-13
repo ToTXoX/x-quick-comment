@@ -844,6 +844,17 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(buddyBounds.x+buddyBounds.width,1400);
     await buddy.hover();
     assert.equal(await exit.evaluate(el=>getComputedStyle(el).opacity),'1');
+    await page.mouse.move(20,20);
+    assert.equal(await exit.evaluate(el=>getComputedStyle(el).opacity),'0');
+    await buddy.press('Tab');
+    assert.equal(await exit.evaluate(el=>el===document.activeElement && getComputedStyle(el).opacity==='1'),true);
+    await exit.evaluate(el=>el.blur());
+    await buddy.hover();
+    await exit.hover();
+    assert.equal(await exit.evaluate(el=>{
+      const {x,y,width,height}=el.getBoundingClientRect();
+      return getComputedStyle(el).opacity==='1' && el.contains(document.elementFromPoint(x+width/2,y+height/2));
+    }),true);
     await exit.click();
     await likeEffect.waitFor({state:'detached'});
     assert.equal(await buddy.count(),0);

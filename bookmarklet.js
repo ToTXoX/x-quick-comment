@@ -51,7 +51,7 @@
   if (!supportedPage()) {
     alert('请打开 X 首页、通知页、用户主页或帖子页，再点击 Peekala 书签'); return;
   }
-  const version = '3.66';
+  const version = '3.67';
   const peekalaMark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <path fill="#b8b6b3" d="M41 46c-4 2-7 3-11 2-2 0-3 2-1 4 3 3 8 4 12 2l4-3zm5 7c-1 3 0 5-2 7-1 2 1 3 3 2 4-1 6-5 7-9z"/>
   <path fill="#d8d5d2" d="M40 38h15v18c-4 2-10 3-13-1-3-4-2-11-2-17z"/>
@@ -111,7 +111,7 @@
   buddy.innerHTML=`
     <button type="button" class="xqc-buddy-open" aria-label="展开 Peekala 侧栏" title="展开侧栏">${peekalaMark}</button>
     <button type="button" class="xqc-buddy-exit" aria-label="退出 Peekala" title="退出 Peekala">
-      <svg aria-hidden="true" width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m2.5 2.5 7 7m0-7-7 7"/></svg>
+      <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m2.5 2.5 7 7m0-7-7 7"/></svg>
     </button>
   `;
   const buddyOpen=buddy.querySelector('.xqc-buddy-open');
@@ -120,6 +120,10 @@
     likeSwitch.focus({preventScroll:true});
   };
   buddy.querySelector('.xqc-buddy-exit').onclick=exitPeekala;
+  buddy.addEventListener('pointerenter',event=>{
+    if (event.pointerType==='mouse') buddy.classList.add('xqc-buddy-hovered');
+  });
+  buddy.addEventListener('pointerleave',()=>buddy.classList.remove('xqc-buddy-hovered'));
 
   let stopSidebar;
   function applyLikeEffects() {
@@ -131,6 +135,7 @@
     for (const stop of likeEffects.values()) stop();
   }
   function setSidebar(open) {
+    if (open) buddy.classList.remove('xqc-buddy-hovered');
     buddy.hidden=open;
     if (open) stopSidebar ??= startSidebar();
     else {
@@ -169,9 +174,9 @@
     #xqc-sidebar-buddy button{box-sizing:border-box;display:grid;place-items:center;padding:0;cursor:pointer}
     #xqc-sidebar-buddy .xqc-buddy-open{width:100%;height:100%;border:0;background:transparent;filter:drop-shadow(0 1px 2px #0003)}
     #xqc-sidebar-buddy .xqc-buddy-open svg{display:block;width:100%;height:100%;transform:translateX(7%)}
-    #xqc-sidebar-buddy .xqc-buddy-exit{position:absolute;top:-5px;right:2px;width:clamp(18px,1.5vw,23px);height:clamp(18px,1.5vw,23px);border:1px solid color-mix(in srgb,CanvasText 22%,transparent);border-radius:50%;background:Canvas;color:CanvasText;opacity:0;pointer-events:none}
-    #xqc-sidebar-buddy .xqc-buddy-exit:focus-visible{opacity:1;pointer-events:auto}
-    @media (any-hover:hover){#xqc-sidebar-buddy:hover .xqc-buddy-exit{opacity:1;pointer-events:auto}}
+    #xqc-sidebar-buddy .xqc-buddy-exit{position:absolute;z-index:1;top:2px;right:3px;width:clamp(22px,1.6vw,26px);height:clamp(22px,1.6vw,26px);border:1px solid Canvas;border-radius:50%;background:CanvasText;color:Canvas;opacity:0;pointer-events:none}
+    #xqc-sidebar-buddy .xqc-buddy-exit:focus-visible,#xqc-sidebar-buddy.xqc-buddy-hovered .xqc-buddy-exit{opacity:1;pointer-events:auto}
+    #xqc-sidebar-buddy .xqc-buddy-exit:focus-visible{outline-color:Canvas}
     #xqc-sidebar-buddy button:focus-visible{outline:2px solid CanvasText;outline-offset:-2px}
     @container (max-width:340px){
       #xqc-native-panel>header:has(.xqc-actions){padding-inline:10px}
