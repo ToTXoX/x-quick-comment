@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "stickers": [
+    { "name": "冒冒探头", "file": "peekala-peek.gif" },
+    { "name": "奶龙", "file": "nailoong.gif" },
+    { "name": "老黄", "file": "jensenhuang.gif" },
+    { "name": "老马", "file": "musk.gif" },
+    { "id": "deepseek", "name": "小肥鱼", "file": "small-fish.gif" },
+    { "id": "deepseek-full", "name": "大肥鱼", "file": "big-fish.gif" },
+    { "name": "芥末辣", "file": "wasabi.gif" }
+  ]
+}

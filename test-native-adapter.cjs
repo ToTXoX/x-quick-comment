@@ -289,12 +289,19 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       document.body.style.minHeight='1400px';
       document.querySelector('#app main').append(sidebar);
     });
-    const stickerDirectory=path.join(__dirname,'docs','like-gifs');
-    const stickerFiles=Object.fromEntries(fs.readdirSync(stickerDirectory)
-      .filter(file=>file.endsWith('.gif'))
-      .map(file=>[path.basename(file,'.gif'),Array.from(fs.readFileSync(path.join(stickerDirectory,file)),byte=>String.fromCharCode(byte+256)).join('')]));
-    const source='window.__xqcStickerFiles='+JSON.stringify(stickerFiles)+';\n'+
-      fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8');
+    const installPage=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
+    const {path:packPath,catalog}=JSON.parse(installPage.match(/const stickerPack = (.*);/)[1]);
+    const pack=fs.readFileSync(path.join(__dirname,packPath)).toString('base64');
+    const source=fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8');
+    const launch=()=>page.evaluate(({source,catalog,pack})=>{
+      const token=crypto.randomUUID();
+      window.__xqcStickerPack={token,catalog};
+      (0,eval)(source);
+      window.dispatchEvent(new MessageEvent('message',{
+        origin:'https://x.usdts.de',
+        data:{kind:'xqc-assets',token,pack:Uint8Array.from(atob(pack),char=>char.charCodeAt(0)).buffer}
+      }));
+    },{source,catalog,pack});
     const featureMenu=page.getByRole('group',{name:'Peekala 功能开关'});
     const buddy=page.getByRole('button',{name:'展开 Peekala 侧栏'});
     const closeSidebar=page.getByRole('button',{name:'关闭 Peekala 侧栏'});
@@ -302,7 +309,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     const effectsSwitch=featureMenu.getByRole('switch',{name:'点赞特效',exact:true});
     const playEffect=featureMenu.getByRole('button',{name:'播放当前点赞特效'});
     const headerEffect=featureMenu.locator('.xqc-like-effect');
-    await page.evaluate(source);
+    await launch();
     await featureMenu.waitFor();
     assert.equal(await featureMenu.evaluate(el=>el.parentElement.matches('#xqc-native-panel > header > .xqc-actions')),true);
     const refreshButton=page.getByRole('button',{name:'重新加载侧栏'});
@@ -313,7 +320,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await featureMenu.getByRole('switch').count(),1);
     assert.equal(await buddy.isVisible(),false);
     assert.equal(await effectsSwitch.isChecked(),true);
-    await page.evaluate(source);
+    await launch();
     assert.equal(await effectsSwitch.evaluate(el=>el===document.activeElement),true);
     const search=page.getByRole('combobox',{name:'Search X'});
     const panel=page.locator('#xqc-native-panel');
@@ -720,7 +727,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.deepEqual(savedFeatures,{likeEffects:true});
     await page.evaluate(()=>localStorage.setItem('xqc-features',JSON.stringify({likeEffects:true,sidebar:false})));
     await page.reload();
-    await page.evaluate(source);
+    await launch();
     assert.equal(await panel.isVisible(),true);
     assert.equal(await buddy.isVisible(),false);
     await page.evaluate(()=>{
@@ -929,7 +936,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await likeEffect.count(),0);
 
     await page.reload();
-    await page.evaluate(source);
+    await launch();
     assert.equal(await panel.isVisible(),true);
     await manage.click();
     await manager.getByRole('button',{name:'我的小动画，使用中'}).waitFor();

@@ -41,8 +41,8 @@
     return;
   }
   const key = '__xQuickComment';
-  const stickerFiles=window.__xqcStickerFiles;
-  delete window.__xqcStickerFiles;
+  const stickerPack=window.__xqcStickerPack;
+  delete window.__xqcStickerPack;
   if (window[key]) { window[key](); return; }
   const reservedPaths = new Set(['explore','search','messages','settings','compose','i','grok','premium','jobs','communities','connect','bookmarks','lists','login','signup']);
   function supportedPage() {
@@ -53,7 +53,8 @@
   if (!supportedPage()) {
     alert('请打开 X 首页、通知页、用户主页或帖子页，再点击 Peekala 书签'); return;
   }
-  const version = '3.69';
+  const version = '3.70';
+  const stickerPackVersion = 1;
   const peekalaMark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <path fill="#b8b6b3" d="M41 46c-4 2-7 3-11 2-2 0-3 2-1 4 3 3 8 4 12 2l4-3zm5 7c-1 3 0 5-2 7-1 2 1 3 3 2 4-1 6-5 7-9z"/>
   <path fill="#d8d5d2" d="M40 38h15v18c-4 2-10 3-13-1-3-4-2-11-2-17z"/>
@@ -149,6 +150,7 @@
   function exitPeekala() {
     stopSidebar?.();
     stopLikeEffects();
+    stopStickerPack?.();
     closeStickerManager();
     buddy.remove();
     stickerManager.remove();
@@ -264,19 +266,38 @@
   const likedButtonSelector='[data-testid="unlike"],.xqc-liked-from-store';
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   const defaultStickerId='peekala-peek';
-  const builtInStickers=[
-    [defaultStickerId,'冒冒探头','peekala-peek'],
-    ['nailoong','奶龙','nailoong'],
-    ['jensenhuang','老黄','jensenhuang',1080],
-    ['musk','老马','musk',1170],
-    ['deepseek','小肥鱼','small-fish'],
-    ['deepseek-full','大肥鱼','big-fish'],
-    ['wasabi','芥末辣','wasabi',3100]
-  ].map(([id,name,file,duration=1440])=>{
-    const data=stickerFiles?.[file];
-    const gif=data && new Blob([Uint8Array.from(data,char=>char.charCodeAt(0)-256)],{type:'image/gif'});
-    return {id,name,duration,gif};
-  });
+  const catalog=stickerPack?.catalog?.version===stickerPackVersion ? stickerPack.catalog : undefined;
+  const builtInStickers=catalog?.stickers.map(({id,name,duration})=>({id,name,duration})) ||
+    [{id:defaultStickerId,name:'冒冒探头',duration:1440}];
+  let stopStickerPack;
+  if (catalog) {
+    const header=new TextEncoder().encode(JSON.stringify(catalog));
+    const expectedSize=4+header.length+catalog.stickers.reduce((sum,sticker)=>sum+sticker.size,0);
+    const timeout=setTimeout(()=>stopStickerPack(),3000);
+    stopStickerPack=()=>{
+      clearTimeout(timeout);
+      window.removeEventListener('message',receiveStickerPack);
+    };
+    function receiveStickerPack(event) {
+      const data=event.data;
+      if (event.origin!=='https://x.usdts.de' || data?.kind!=='xqc-assets' ||
+          data.token!==stickerPack.token) return;
+      stopStickerPack();
+      const pack=data.pack;
+      if (!(pack instanceof ArrayBuffer) || pack.byteLength!==expectedSize ||
+          new DataView(pack).getUint32(0,true)!==header.length) return;
+      const bytes=new Uint8Array(pack);
+      if (!header.every((byte,index)=>byte===bytes[index+4])) return;
+      let offset=4+header.length;
+      for (const [index,sticker] of catalog.stickers.entries()) {
+        const end=offset+sticker.size;
+        builtInStickers[index].gif=new Blob([bytes.subarray(offset,end)],{type:'image/gif'});
+        offset=end;
+      }
+      if (stickerManager.matches(':popover-open')) void loadStickerPosters();
+    }
+    window.addEventListener('message',receiveStickerPack);
+  }
 
   const stickerIcons={
     close:'<path d="m4 4 8 8m0-8-8 8"/>',
@@ -466,6 +487,12 @@
       canvas.getContext('2d').drawImage(bitmap,(52-width)/2,(52-height)/2,width,height);
       return await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob ? resolve(blob) : reject(Error('缩略图生成失败'))));
     } finally { bitmap.close(); }
+  }
+  async function loadStickerPosters() {
+    await Promise.all(builtInStickers.map(async sticker=>{
+      if (sticker.gif && !sticker.poster) sticker.poster=await stickerPoster(sticker.gif).catch(()=>undefined);
+    }));
+    renderStickers();
   }
   function setThumbnail(img,sticker) {
     if (!sticker.poster) {
@@ -698,9 +725,7 @@
       stickerResizeObserver.observe(stickerManager);
       window.addEventListener('resize',positionStickerManager);
       window.addEventListener('scroll',positionStickerManager,true);
-      void Promise.all(builtInStickers.map(async sticker=>{
-        if (sticker.gif && !sticker.poster) sticker.poster=await stickerPoster(sticker.gif).catch(()=>undefined);
-      })).then(renderStickers);
+      void loadStickerPosters();
     } else {
       stickerResizeObserver.disconnect();
       window.removeEventListener('resize',positionStickerManager);
