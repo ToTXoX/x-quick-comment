@@ -53,7 +53,7 @@
   if (!supportedPage()) {
     alert('请打开 X 首页、通知页、用户主页或帖子页，再点击 Peekala 书签'); return;
   }
-  const version = '3.70';
+  const version = '3.71';
   const stickerPackVersion = 1;
   const peekalaMark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <path fill="#b8b6b3" d="M41 46c-4 2-7 3-11 2-2 0-3 2-1 4 3 3 8 4 12 2l4-3zm5 7c-1 3 0 5-2 7-1 2 1 3 3 2 4-1 6-5 7-9z"/>
@@ -94,7 +94,7 @@
         </button>
       </div>
       <label>点赞特效<input type="checkbox" role="switch"></label>
-      <button type="button" class="xqc-sticker-manage" aria-label="管理点赞特效动画" aria-expanded="false" aria-controls="xqc-sticker-manager">管理</button>
+      <button type="button" class="xqc-sticker-manage" aria-expanded="false" aria-controls="xqc-sticker-manager">换表情</button>
     </div>
   `;
   const manageButton=controls.querySelector('.xqc-sticker-manage');
@@ -173,6 +173,8 @@
     #xqc-feature-controls .xqc-sticker-play:active svg{transform:scale(.86)}
     #xqc-feature-controls .xqc-sticker-playback .xqc-like-effect{position:absolute;top:50%;left:50%}
     #xqc-native-panel .xqc-actions .xqc-sticker-manage{display:block;width:auto;height:24px;padding:0 3px;border:0;border-radius:4px;font:inherit;text-decoration:underline;text-underline-offset:2px}
+    #xqc-native-panel .xqc-actions .xqc-sidebar-collapse{display:inline-flex;align-items:center;gap:5px;width:auto;padding:0 9px;border-radius:8px;font:500 12px/1 system-ui;white-space:nowrap}
+    #xqc-native-panel .xqc-sidebar-collapse svg{flex:none}
     #xqc-sidebar-buddy{--xqc-buddy-size:clamp(48px,4.7vw,88px);position:fixed;z-index:99;top:clamp(70px,22vh,170px);right:0;width:var(--xqc-buddy-size);height:var(--xqc-buddy-size);color-scheme:light dark}
     #xqc-sidebar-buddy[hidden]{display:none!important}
     #xqc-sidebar-buddy button{box-sizing:border-box;display:grid;place-items:center;padding:0;cursor:pointer}
@@ -868,11 +870,74 @@
     host.id = 'xqc-native-panel';
     host.setAttribute('aria-label','Peekala 冒冒 · 用户主页');
     host.dataset.version=version;
-    host.innerHTML = `<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true">${peekalaMark}</span><div><strong>Peekala <span class="xqc-brand-zh">冒冒</span></strong><span class="xqc-caption">刷新后点击书签恢复设置</span></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" aria-label="关闭 Peekala 侧栏" title="关闭 Peekala 侧栏">×</button></div></header><p role="status" aria-live="polite"></p><div class="xqc-root"></div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 动态书签自动获取更新</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
+    host.innerHTML = `<header><div class="xqc-brand"><span class="xqc-mark" aria-hidden="true">${peekalaMark}</span><div><strong>Peekala <span class="xqc-brand-zh">冒冒</span></strong><span class="xqc-caption">刷新后点击书签恢复设置</span></div></div><div class="xqc-actions"><button type="button" aria-label="重新加载侧栏" title="重新加载侧栏">↻</button><button type="button" class="xqc-sidebar-collapse"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 4 4 4-4 4m7-9v10"/></svg>收起侧栏</button></div></header><p role="status" aria-live="polite"></p>
+      <div class="xqc-profile-stage">
+        <div class="xqc-root"></div>
+        <div class="xqc-profile-skeleton" aria-hidden="true">
+          <div class="xqc-skeleton-profile">
+            <span class="xqc-skeleton-avatar"></span>
+            <span class="xqc-skeleton-line"></span>
+            <span class="xqc-skeleton-line"></span>
+            <span class="xqc-skeleton-line"></span>
+          </div>
+          <div class="xqc-skeleton-post">
+            <span class="xqc-skeleton-avatar"></span>
+            <div><span class="xqc-skeleton-line"></span><span class="xqc-skeleton-line"></span><span class="xqc-skeleton-line"></span></div>
+          </div>
+          <div class="xqc-skeleton-post">
+            <span class="xqc-skeleton-avatar"></span>
+            <div><span class="xqc-skeleton-line"></span><span class="xqc-skeleton-line"></span><span class="xqc-skeleton-line"></span></div>
+          </div>
+        </div>
+      </div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 动态书签自动获取更新</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
     const style = document.createElement('style');
     // X portals live outside this panel; keep native menus/dialogs above it.
     // Removing this style on cleanup restores the original layering.
     style.textContent = `#layers{z-index:101!important}#xqc-native-panel{position:fixed;top:0;bottom:0;right:0;width:var(--xqc-width,380px);z-index:100;background:Canvas;color:CanvasText;border-left:1px solid color-mix(in srgb,CanvasText 12%,transparent);box-shadow:-12px 0 48px #00000007;scrollbar-width:thin;scrollbar-color:#88888866 transparent;overflow:auto;overscroll-behavior:contain;color-scheme:light dark;padding-bottom:48px}#xqc-native-panel>header{display:flex;justify-content:space-between;align-items:center;padding:24px 20px 12px;min-height:38px;gap:12px;position:sticky;top:0;background:Canvas;z-index:5;font:14px system-ui;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent)}#xqc-native-panel>p{margin:20px;padding:18px 20px;border:1px solid color-mix(in srgb,CanvasText 10%,transparent);border-radius:14px;background:color-mix(in srgb,CanvasText 3%,Canvas);white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 system-ui}#xqc-native-panel>p button{margin-top:10px;padding:4px 10px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;cursor:pointer}#xqc-native-panel>p a{color:inherit}#xqc-native-panel .xqc-brand{display:flex;align-items:center;gap:11px}#xqc-native-panel .xqc-mark{width:26px;height:26px;display:grid;place-items:center;color:CanvasText}#xqc-native-panel .xqc-brand strong{display:block;font-size:15px;white-space:nowrap}#xqc-native-panel .xqc-brand-zh{margin-left:3px;font-size:11px;font-weight:500;opacity:.62}#xqc-native-panel .xqc-mark svg{display:block;width:26px;height:26px}#xqc-native-panel .xqc-actions{display:flex;flex-shrink:0;gap:6px}#xqc-native-panel .xqc-caption{display:block;margin-top:3px;font-size:11px;letter-spacing:.3px;opacity:.55}#xqc-native-panel .xqc-actions button{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;padding:0;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:50%;background:transparent;color:inherit;font:23px/1 system-ui;cursor:pointer}#xqc-native-panel .xqc-actions button:hover{background:color-mix(in srgb,CanvasText 7%,Canvas)}#xqc-native-panel .xqc-actions button:focus-visible{outline:2px solid CanvasText;outline-offset:3px}#xqc-native-panel .xqc-footer{position:fixed;right:0;bottom:0;width:inherit;height:48px;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;border-top:1px solid color-mix(in srgb,CanvasText 10%,transparent);background:Canvas;color:CanvasText;font:10px system-ui}#xqc-native-panel .xqc-footer-note{display:flex;align-items:center;gap:3px;height:18px;white-space:nowrap;opacity:.72}#xqc-native-panel .xqc-footer-note .xqc-version{font-weight:600}#xqc-native-panel .xqc-footer-links{display:flex;align-items:center;justify-content:center;gap:10px;height:24px}#xqc-native-panel .xqc-footer a{display:grid;place-items:center;width:22px;height:22px;color:inherit;text-decoration:none;opacity:.65}#xqc-native-panel .xqc-footer-note a{display:inline;width:auto;height:auto;color:inherit;text-decoration:underline;opacity:1}#xqc-native-panel .xqc-footer a:hover{opacity:1}#xqc-native-panel .xqc-footer a:focus-visible{outline:2px solid CanvasText;outline-offset:1px}#xqc-native-panel .xqc-footer svg{width:14px;height:14px}#xqc-native-panel .xqc-footer a span{font:16px/1 system-ui}#xqc-native-panel [data-testid="like"].xqc-liked-from-store,#xqc-native-panel [data-testid="like"].xqc-liked-from-store svg{color:rgb(249,24,128)!important}#xqc-native-panel.xqc-stalled .xqc-root [role=progressbar]{display:none!important}#xqc-native-panel .xqc-root main{width:100%;max-width:100%;min-width:0}#xqc-native-panel .xqc-root aside,#xqc-native-panel [data-testid="sidebarColumn"]{display:none!important}#xqc-native-panel [data-testid="primaryColumn"]{width:100%!important;min-width:0!important;max-width:100%!important}#xqc-native-panel .xqc-root:has(>div){min-height:50px}`;
+    style.textContent += `
+      #xqc-native-panel .xqc-profile-skeleton{display:none}
+      #xqc-native-panel[data-loading]>.xqc-profile-stage{position:relative;min-height:260px}
+      #xqc-native-panel[data-loading]>.xqc-profile-stage>.xqc-profile-skeleton{display:block}
+      #xqc-native-panel[data-loading]>.xqc-profile-stage>.xqc-profile-skeleton{position:absolute;inset:0 0 auto}
+      #xqc-native-panel[data-loading]>.xqc-profile-stage>.xqc-root{opacity:0;visibility:hidden;pointer-events:none}
+      #xqc-native-panel[data-loading]>p{
+        display:flex;align-items:center;gap:8px;margin:16px 20px 12px;padding:0;border:0;
+        background:none;color:color-mix(in srgb,CanvasText 76%,Canvas);font:12px/1.5 system-ui;
+      }
+      #xqc-native-panel[data-loading]>p::before{
+        content:"";box-sizing:border-box;flex:0 0 12px;height:12px;border:1.5px solid currentColor;
+        border-right-color:transparent;border-radius:50%;animation:xqc-loader-spin .8s linear infinite;
+      }
+      #xqc-native-panel .xqc-profile-skeleton{
+        --xqc-skeleton-base:color-mix(in srgb,CanvasText 9%,Canvas);
+        --xqc-skeleton-highlight:color-mix(in srgb,CanvasText 3%,Canvas);
+        padding:0 20px 16px;
+      }
+      #xqc-native-panel .xqc-skeleton-profile{padding:14px 0 20px}
+      #xqc-native-panel .xqc-skeleton-post{
+        display:grid;grid-template-columns:36px minmax(0,1fr);gap:12px;
+        border-top:1px solid color-mix(in srgb,CanvasText 9%,transparent);padding:16px 0;
+      }
+      #xqc-native-panel .xqc-skeleton-avatar,#xqc-native-panel .xqc-skeleton-line{
+        display:block;background:var(--xqc-skeleton-base);border-radius:999px;
+      }
+      #xqc-native-panel .xqc-skeleton-avatar{width:36px;height:36px}
+      #xqc-native-panel .xqc-skeleton-profile .xqc-skeleton-avatar{width:52px;height:52px;margin-bottom:14px}
+      #xqc-native-panel .xqc-skeleton-line{height:8px;margin:8px 0;width:85%}
+      #xqc-native-panel .xqc-skeleton-line:nth-last-child(3){height:10px;width:34%}
+      #xqc-native-panel .xqc-skeleton-line:last-child{width:59%}
+      @media (prefers-reduced-motion:no-preference){
+        #xqc-native-panel[data-loading] :is(.xqc-skeleton-avatar,.xqc-skeleton-line){
+          background-image:linear-gradient(105deg,var(--xqc-skeleton-base) 38%,var(--xqc-skeleton-highlight) 50%,var(--xqc-skeleton-base) 62%);
+          background-size:240% 100%;animation:xqc-loader-sweep 1.65s ease-in-out infinite;
+        }
+      }
+      @media (prefers-reduced-motion:reduce){
+        #xqc-native-panel[data-loading]>p::before{animation:none}
+      }
+      @keyframes xqc-loader-spin{to{transform:rotate(1turn)}}
+      @keyframes xqc-loader-sweep{from{background-position:100% 0}to{background-position:0 0}}
+    `;
     host.querySelector('.xqc-actions').prepend(controls);
     document.head.append(style); document.body.append(host);
     // #layers itself can have z-index 101 while its ancestors remain in a
@@ -1051,7 +1116,16 @@
     }
     let loadSerial = 0;
     const firstRetryMs = 3000, finalWaitMs = 4000;
-    const report = message => { status.hidden = false; status.textContent = message; };
+    const setLoading = loading => {
+      host.toggleAttribute('data-loading',loading);
+      if (loading) mount.setAttribute('aria-busy','true');
+      else mount.removeAttribute('aria-busy');
+    };
+    const report = (message,loading=false) => {
+      setLoading(loading);
+      status.hidden = false;
+      status.textContent = message;
+    };
     const hasPosts = () => {
       const tweet=mount.querySelector('[data-testid="tweet"]');
       // Profile placeholders and error screens may contain an article. Only a
@@ -1063,6 +1137,7 @@
       loadedHandle=handle;
       pendingHandle=failedHandle=undefined;
       status.hidden=true;
+      setLoading(false);
       host.classList.remove('xqc-stalled');
       clearTimeout(timeout);
     }
@@ -1144,7 +1219,7 @@
       playButton.onclick=null;
       host.remove(); style.remove();
     };
-    host.querySelector('[aria-label="关闭 Peekala 侧栏"]').onclick = () => setSidebar(false);
+    host.querySelector('.xqc-sidebar-collapse').onclick = () => setSidebar(false);
     host.querySelector('[aria-label="重新加载侧栏"]').onclick = () => {
       if (desiredHandle) void restart(desiredHandle);
       else report('请先点击左侧头像。');
@@ -1473,7 +1548,9 @@
       }
       observer=new MutationObserver(()=>{
         scheduleLikeSync();
-        if(!status.hidden && !nativeError && hasPosts()) finishLoading(desiredHandle,loadSerial);
+        if((pendingHandle || host.classList.contains('xqc-stalled')) && !nativeError && hasPosts()) {
+          finishLoading(desiredHandle,loadSerial);
+        }
       });
       observer.observe(mount,{subtree:true,childList:true,characterData:true});
       // React 19 reports errors caught by nested X boundaries here, even if X
@@ -1502,7 +1579,7 @@
       host.classList.remove('xqc-stalled');
       desiredHandle = handle;
       const serial = ++loadSerial;
-      report((retried?'正在重试 @':'正在加载 @')+handle+' 的原生主页…');
+      report((retried?'正在重试 @':'正在加载 @')+handle+' 的原生主页…',true);
       watchPosts(handle, serial, retried);
       try {
         if (!ready) ready = initialize(handle);

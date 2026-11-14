@@ -108,7 +108,7 @@ const {chromium} = require(path.join(dir, 'node_modules/playwright-core'));
       assert.equal(assetsMessage.kind,'xqc-assets');
       assert.equal(assetsMessage.token,scriptMessage.token);
       assert.equal(assetsMessage.bytes,gifsAvailable ? pack.length : undefined);
-      await page.getByRole('button',{name:'管理点赞特效动画'}).click();
+      await page.getByRole('button',{name:'换表情',exact:true}).click();
       const wasabi=page.getByRole('button',{name:'芥末辣',exact:true});
       if (gifsAvailable) {
         await page.waitForFunction(count=>[...document.querySelectorAll('.xqc-sticker-tile img')]
