@@ -24,9 +24,9 @@
 | :---: | :---: | :---: |
 | <img src="docs/like-gifs/peekala-peek.gif" width="96" alt="冒冒探头点赞 GIF"> | <img src="docs/like-gifs/nailoong.gif" width="96" alt="奶龙点赞 GIF"> | <img src="docs/like-gifs/jensenhuang.gif" width="96" alt="老黄点赞 GIF"> |
 
-| 老马 | 小肥鱼 | 大肥鱼 |
-| :---: | :---: | :---: |
-| <img src="docs/like-gifs/musk.gif" width="96" alt="老马点赞 GIF"> | <img src="docs/like-gifs/small-fish.gif" width="96" alt="小肥鱼点赞 GIF，爱心向左上飘"> | <img src="docs/like-gifs/big-fish.gif" width="96" alt="大肥鱼点赞 GIF"> |
+| 老马 | 小肥鱼 | 大肥鱼 | 芥末辣 |
+| :---: | :---: | :---: | :---: |
+| <img src="docs/like-gifs/musk.gif" width="96" alt="老马点赞 GIF"> | <img src="docs/like-gifs/small-fish.gif" width="96" alt="小肥鱼点赞 GIF，爱心向左上飘"> | <img src="docs/like-gifs/big-fish.gif" width="96" alt="大肥鱼点赞 GIF"> | <img src="docs/like-gifs/wasabi.gif" width="96" alt="芥末辣点赞 GIF"> |
 
 奶龙表情来自 [Nailoong 官方 GIPHY](https://giphy.com/stickers/transparent-k0XrKqlfnnCSAHWV3F)。
 
@@ -61,6 +61,7 @@
 - **站外点击书签会怎样？** 新版书签会询问是否跳转到 X 首页。到达后再点一次书签即可展开侧栏。
 - **刷新 X 后怎么恢复？** 再点一次「点我冒冒」，会展开侧栏并恢复点赞特效设置。
 - **怎么更新？** 动态书签会短暂打开安装页，从 GitHub 的 `main` 分支加载脚本，失败时使用安装页内置版本。若要更新书签本身，从安装页重新拖入一次。
+- **旧动态书签还能用吗？** 可以。安装页在启动时加载内置 GIF，原有动态书签可以继续使用。
 - **书签点了没反应？** 在 X 页面允许弹窗后重试。侧栏加载卡住时可点「↻」重试，空间不足时可以拉宽窗口。
 
 </details>

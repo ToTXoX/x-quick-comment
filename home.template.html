@@ -164,21 +164,44 @@ document.getElementById('copy-code').onclick=async()=>{
   document.body.classList.add('loading');
   document.querySelector('.load-status').hidden = false;
   const sourceUrl = 'https://raw.githubusercontent.com/ToTXoX/x-quick-comment/main/bookmarklet.js';
+  const maxSourceLength = 250000;
+  const stickerFiles = __STICKER_FILES_JSON__;
+  async function loadSticker(file) {
+    const response = await fetch(new URL('docs/like-gifs/' + file, location.href), {signal:AbortSignal.timeout(6000)});
+    if (!response.ok) throw Error('GIF 加载失败');
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (String.fromCharCode(...bytes.subarray(0,6)) !== 'GIF89a') throw Error('无效的 GIF');
+    // Keep each byte inside U+0100–U+01FF so JSON needs no escaping.
+    const data = Array.from(bytes,byte=>String.fromCharCode(byte+256)).join('');
+    return [file.slice(0,-4),data];
+  }
+  async function loadStickers() {
+    const results = await Promise.allSettled(stickerFiles.map(loadSticker));
+    return Object.fromEntries(results.filter(result=>result.status==='fulfilled').map(result=>result.value));
+  }
   (async () => {
+    if (!window.opener) {
+      document.querySelector('.load-status').textContent = '无法连接 X 页面，请关闭窗口后重试。';
+      return;
+    }
+    const stickers = loadStickers();
     let source;
     try {
       const response = await fetch(sourceUrl + '?t=' + Date.now(), {cache:'no-store',referrerPolicy:'no-referrer'});
       if (!response.ok) throw Error('GitHub 返回 ' + response.status);
       source = await response.text();
-      if (source.length < 1000 || source.length > 250000 || !source.includes('__xQuickComment')) {
+      if (source.length < 1000 || source.length > maxSourceLength || !source.includes('__xQuickComment')) {
         throw Error('GitHub 返回的脚本无效');
       }
     } catch {
       // The published installation page contains a known working copy.
       source = decodeURIComponent(__STATIC_BOOKMARK_JSON__.slice('javascript:'.length));
     }
-    if (window.opener) window.opener.postMessage({kind:'xqc-source',token,source}, 'https://x.com');
-    else document.querySelector('.load-status').textContent = '无法连接 X 页面，请关闭窗口后重试。';
+    if (source.includes('__xqcStickerFiles')) {
+      const stickerSource = 'window.__xqcStickerFiles=' + JSON.stringify(await stickers) + ';\n';
+      if (source.length + stickerSource.length <= maxSourceLength) source = stickerSource + source;
+    }
+    window.opener.postMessage({kind:'xqc-source',token,source}, 'https://x.com');
   })();
 })();
 </script></body></html>

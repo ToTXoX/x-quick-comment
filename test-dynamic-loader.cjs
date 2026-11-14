@@ -12,6 +12,7 @@ const {chromium} = require(path.join(dir, 'node_modules/playwright-core'));
   try {
     const loader = fs.readFileSync(path.join(__dirname,'loader-bookmarklet.js'),'utf8');
     const source = fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8');
+    const version = source.match(/const version = '([^']+)'/)[1];
     const installPage = fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
     const bookmarkUrl = 'javascript:' + encodeURIComponent(loader);
     assert.ok(bookmarkUrl.length < 8000);
@@ -20,7 +21,7 @@ const {chromium} = require(path.join(dir, 'node_modules/playwright-core'));
     const bookmarks = fs.readFileSync(path.join(__dirname,'x-quick-comment-bookmarks.html'),'utf8');
     assert.ok(bookmarks.includes(bookmarkUrl));
     assert.match(bookmarks, /ICON="[^"]+">点我冒冒<\/A>/);
-    const csp = "default-src 'self'; script-src 'self' 'nonce-fixture'; connect-src 'self'; frame-src 'self'";
+    const csp = "default-src 'self'; script-src 'self' 'nonce-fixture'; connect-src 'self'; frame-src 'self'; img-src 'self' data: blob:";
     const xPage = `<meta property="csp-nonce" content="fixture"><button id="launch">Launch</button>
       <script nonce="fixture">document.getElementById('launch').onclick=()=>{${loader}};</script>`;
     for (const githubAvailable of [true,false]) {
@@ -29,13 +30,20 @@ const {chromium} = require(path.join(dir, 'node_modules/playwright-core'));
       await context.route('https://x.com/**',route=>route.fulfill({
         contentType:'text/html',headers:{'content-security-policy':csp,'cross-origin-opener-policy':'same-origin-allow-popups'},body:xPage
       }));
-      await context.route('https://x.usdts.de/**',route=>route.fulfill({contentType:'text/html',body:installPage}));
+      const requestedStickers = new Set();
+      await context.route('https://x.usdts.de/**',route=>{
+        const requestPath=new URL(route.request().url()).pathname;
+        const asset=requestPath.match(/^\/docs\/like-gifs\/([a-z-]+)\.gif$/)?.[1];
+        if (!asset) return route.fulfill({contentType:'text/html',body:installPage});
+        requestedStickers.add(asset);
+        return route.fulfill({contentType:'image/gif',path:path.join(__dirname,'docs','like-gifs',asset+'.gif')});
+      });
       await context.route('https://raw.githubusercontent.com/**',route=>route.fulfill({
         status:githubAvailable?200:503,
         contentType:'text/plain',
         headers:{'access-control-allow-origin':'*'},
         body:githubAvailable
-          ? 'window.__xQuickComment=()=>{};window.__xqcRemoteLoaded=true;/*'+'x'.repeat(1000)+'*/'
+          ? 'window.__xqcRemoteLoaded=true;\n'+source
           : 'Unavailable'
       }));
       const page = await context.newPage();
@@ -61,9 +69,15 @@ const {chromium} = require(path.join(dir, 'node_modules/playwright-core'));
         await page.goto('https://x.com/notifications');
       }
       await page.locator('#launch').click();
-      await page.waitForFunction(available=>available
-        ? window.__xqcRemoteLoaded === true
-        : !!document.querySelector('#xqc-native-panel'),githubAvailable);
+      await page.locator(`#xqc-native-panel[data-version="${version}"]`).waitFor({timeout:10000});
+      assert.equal(await page.evaluate(()=>window.__xqcRemoteLoaded===true),githubAvailable);
+      assert.deepEqual([...requestedStickers].sort(),['big-fish','jensenhuang','musk','nailoong','peekala-peek','small-fish','wasabi']);
+      await page.getByRole('button',{name:'管理点赞特效动画'}).click();
+      await page.waitForFunction(()=>[...document.querySelectorAll('.xqc-sticker-tile img')]
+        .filter(img=>img.naturalWidth>0).length===7,undefined,{timeout:5000});
+      await page.getByRole('button',{name:'芥末辣',exact:true}).click();
+      await page.waitForFunction(()=>document.querySelector('#xqc-sticker-manager .xqc-like-effect img')?.naturalWidth===64);
+      await page.keyboard.press('Escape');
       if (!githubAvailable) {
         const controls=page.getByRole('group',{name:'Peekala 功能开关'});
         await controls.waitFor();

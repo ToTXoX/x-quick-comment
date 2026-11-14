@@ -289,7 +289,12 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       document.body.style.minHeight='1400px';
       document.querySelector('#app main').append(sidebar);
     });
-    const source=fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8');
+    const stickerDirectory=path.join(__dirname,'docs','like-gifs');
+    const stickerFiles=Object.fromEntries(fs.readdirSync(stickerDirectory)
+      .filter(file=>file.endsWith('.gif'))
+      .map(file=>[path.basename(file,'.gif'),Array.from(fs.readFileSync(path.join(stickerDirectory,file)),byte=>String.fromCharCode(byte+256)).join('')]));
+    const source='window.__xqcStickerFiles='+JSON.stringify(stickerFiles)+';\n'+
+      fs.readFileSync(path.join(__dirname,'bookmarklet.js'),'utf8');
     const featureMenu=page.getByRole('group',{name:'Peekala 功能开关'});
     const buddy=page.getByRole('button',{name:'展开 Peekala 侧栏'});
     const closeSidebar=page.getByRole('button',{name:'关闭 Peekala 侧栏'});
@@ -744,7 +749,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.waitForFunction(()=>document.querySelector('[data-active-thumbnail]')?.naturalWidth===52);
     const builtInTiles=manager.locator('.xqc-sticker-grid [data-sticker-id]');
     assert.deepEqual(await builtInTiles.evaluateAll(tiles=>tiles.map(tile=>tile.getAttribute('aria-label'))),
-      ['冒冒探头，使用中','奶龙','老黄','老马','小肥鱼','大肥鱼']);
+      ['冒冒探头，使用中','奶龙','老黄','老马','小肥鱼','大肥鱼','芥末辣']);
     const originalThumbnail=await activeThumbnail.getAttribute('src');
     await manager.getByRole('button',{name:'奶龙',exact:true}).click();
     await page.waitForFunction(()=>document.querySelector('#xqc-sticker-manager .xqc-like-effect img')?.naturalWidth===48);
@@ -801,6 +806,26 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await manager.getByRole('button',{name:'使用此特效'}).click();
     await manager.getByRole('button',{name:'大肥鱼，使用中'}).waitFor();
     assert.equal(await activeSticker.textContent(),'大肥鱼');
+    await manager.getByRole('button',{name:'芥末辣',exact:true}).click();
+    await page.waitForFunction(()=>{
+      const image=document.querySelector('#xqc-sticker-manager .xqc-like-effect img');
+      return image?.naturalWidth===64 &&
+        image.parentElement.style.getPropertyValue('--xqc-like-duration')==='3100ms';
+    });
+    await manager.getByRole('button',{name:'使用此特效'}).click();
+    await manager.getByRole('button',{name:'芥末辣，使用中'}).waitFor();
+    assert.equal(await activeSticker.textContent(),'芥末辣');
+    await page.keyboard.press('Escape');
+    await manager.waitFor({state:'hidden'});
+    await page.locator('#sticker-like').click();
+    await page.waitForFunction(()=>{
+      const image=document.querySelector('.xqc-like-effect img');
+      return image?.naturalWidth===64 &&
+        image.parentElement.style.getPropertyValue('--xqc-like-duration')==='3100ms';
+    });
+    await page.locator('#sticker-like').click();
+    await likeEffect.waitFor({state:'detached'});
+    await manage.click();
     await manager.getByRole('button',{name:'冒冒探头',exact:true}).click();
     await manager.getByRole('button',{name:'使用此特效'}).click();
     await builtInTile.waitFor();
