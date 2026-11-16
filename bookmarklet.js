@@ -53,7 +53,7 @@
   if (!supportedPage()) {
     alert('请打开 X 首页、通知页、用户主页或帖子页，再点击 Peekala 书签'); return;
   }
-  const version = '3.74';
+  const version = '3.75';
   const stickerPackVersion = 1;
   const peekalaMark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <path fill="#b8b6b3" d="M41 46c-4 2-7 3-11 2-2 0-3 2-1 4 3 3 8 4 12 2l4-3zm5 7c-1 3 0 5-2 7-1 2 1 3 3 2 4-1 6-5 7-9z"/>
@@ -919,6 +919,7 @@
     const homeJumpRowKeys=new WeakMap();
     const jumpLayouts=new WeakMap();
     const jumpMarkHeight=18;
+    const jumpRefreshLimit=3;
     let disposed=false;
     readingJumps=document.createElement('nav');
     readingJumps.id='xqc-reading-jumps';
@@ -1003,6 +1004,7 @@
     let jumpMounted=new Map();
     let jumpEntries, jumpRanks;
     let jumpOrder=[], jumpCurrentCount=0, jumpOrderModel, jumpOrderLayout, jumpRefreshIndexes=[];
+    let jumpActiveBoundaries=new Map();
     let jumpLimit=0, jumpReadingKey, jumpBrowseKey, jumpWheelDelta=0;
     let jumpPreviewButton, jumpPreviewTimer, jumpMissingKey;
     let jumpHintKey, jumpHintButton, jumpHintTimer;
@@ -1217,26 +1219,40 @@
       return link?.origin===location.origin && link.pathname.match(/\/status\/(\d+)\/?$/)?.[1]===key
         ? link.pathname : `/i/web/status/${key}`;
     }
-    function rememberJumpRefresh(timeline,firstKey,rows,model) {
-      if (!firstKey) return;
-      const {refreshHead,refreshRanks,posts,refreshBoundaries}=timeline;
-      const ranks=model?.ranks.size ? model.ranks : undefined;
-      timeline.refreshHead=firstKey;
-      if (ranks || firstKey!==refreshHead) timeline.refreshRanks=ranks;
-      if (!refreshHead || firstKey===refreshHead || refreshRanks?.has(firstKey) || posts.has(firstKey)) return;
-
-      // A new prefix begins a refresh batch. The first retained post anchors its lower boundary.
-      const previousLayout=posts.get(refreshHead)?.layout;
-      const retained=key=>refreshRanks ? refreshRanks.has(key) : previousLayout && posts.get(key)?.layout===previousLayout;
-      const currentKeys=ranks?.keys() ?? rows.map(row=>row.key);
-      let boundary;
-      for (const key of currentKeys) if (retained(key)) {
-        boundary=key;
-        break;
+    function readJumpOwnReplies(keys) {
+      if (!keys?.length) return new Set();
+      for (let fiber=fiberOf(jumpRegion);fiber;fiber=fiber.return) {
+        const value=fiber.memoizedProps?.value;
+        const viewer=value?.loggedInUserId ?? value?.viewerUserId;
+        if (!viewer) continue;
+        try {
+          const tweets=value.store?.getState()?.entities?.tweets?.entities;
+          if (!tweets) continue;
+          return new Set(keys.filter(key=>{
+            const tweet=tweets[key];
+            return tweet?.in_reply_to_status_id_str && String(tweet.user ?? tweet.user_id_str)===String(viewer);
+          }));
+        } catch {}
       }
-      boundary ??= posts.has(refreshHead) ? refreshHead : undefined;
-      if (!boundary) return;
-      refreshBoundaries.set(boundary,`刷新分隔 · ${jumpRefreshTime.format(Date.now())}`);
+      return new Set();
+    }
+    function rememberJumpRefresh(timeline,keys) {
+      const {refreshKeys:previous,posts,refreshBoundaries}=timeline;
+      if (!keys?.length || keys===previous) return;
+      timeline.refreshKeys=keys;
+      const boundary=previous?.[0];
+      if (!boundary || keys[0]===boundary || posts.has(keys[0])) return;
+
+      const start=keys.indexOf(boundary);
+      if (start<=0 || keys.length-start<Math.min(2,previous.length)) return;
+      const oldKeys=new Set(previous);
+      for (let i=0;i<start;i++) if (oldKeys.has(keys[i]) || posts.has(keys[i])) return;
+      // Confirm that the old timeline continues in order immediately after the new prefix.
+      const retained=Math.min(previous.length,keys.length-start);
+      for (let i=0;i<retained;i++) if (keys[start+i]!==previous[i]) return;
+
+      refreshBoundaries.delete(boundary);
+      refreshBoundaries.set(boundary,{preceding:keys[start-1],label:`刷新分隔 · ${jumpRefreshTime.format(Date.now())}`});
       return boundary;
     }
     function rememberJumpPosts(rows,layout,model) {
@@ -1279,29 +1295,40 @@
       jumpContentChanged=false;
       return changed;
     }
-    function updateJumpOrder(timeline,layout,model) {
-      const history=new Map(timeline.posts);
-      history.delete(timeline.firstKey);
+    function updateJumpOrder(timeline,layout,model,ownReplies) {
+      const {firstKey,posts,refreshBoundaries}=timeline;
+      const history=new Map(posts);
+      history.delete(firstKey);
+      let keys=model?.keys ?? [];
+      if (!model && layout) {
+        const sameLayout=[...history].filter(([,post])=>post.layout===layout).sort((a,b)=>a[1].top-b[1].top);
+        keys=[firstKey,...sameLayout.map(([key])=>key)];
+      }
+      const validBoundaries=new Set();
+      let preceding;
+      for (const key of keys) {
+        if (ownReplies.has(key)) continue;
+        const boundary=refreshBoundaries.get(key);
+        if (boundary && boundary.preceding===preceding) validBoundaries.add(key);
+        preceding=key;
+      }
+      const recent=[...refreshBoundaries.keys()].filter(key=>validBoundaries.has(key)).slice(-jumpRefreshLimit);
+      jumpActiveBoundaries=new Map(recent.map(key=>[key,refreshBoundaries.get(key).label]));
       const current=[];
       function include(key) {
-        if (key===timeline.firstKey) return;
+        if (key===firstKey) return;
         const post=history.get(key);
-        if (!post && (!model?.ranks.has(key) || !timeline.refreshBoundaries.has(key))) return;
+        if (!post && !jumpActiveBoundaries.has(key)) return;
         current.push([key,post]);
         history.delete(key);
       }
-      if (model) {
-        for (const key of model.ranks.keys()) include(key);
-        for (const key of jumpMounted.keys()) if (!model.ranks.has(key)) include(key);
-      } else if (layout) {
-        const sameLayout=[...history].filter(([,post])=>post.layout===layout).sort((a,b)=>a[1].top-b[1].top);
-        for (const [key] of sameLayout) include(key);
-      }
+      for (const key of keys) include(key);
+      if (model) for (const key of jumpMounted.keys()) if (!model.ranks.has(key)) include(key);
       jumpCurrentCount=current.length;
       jumpOrder=[...current,...history];
       jumpRefreshIndexes=[];
       for (const [index,[key]] of jumpOrder.entries()) {
-        if (timeline.refreshBoundaries.has(key)) jumpRefreshIndexes.push(index);
+        if (jumpActiveBoundaries.has(key)) jumpRefreshIndexes.push(index);
       }
       jumpOrderModel=model;
       jumpOrderLayout=layout;
@@ -1317,7 +1344,7 @@
       const browse=jumpOrder.findIndex(([key])=>key===jumpBrowseKey);
       const center=browse>=0 ? browse : Math.max(0,current);
       const requested=jumpOrder.findIndex(([key])=>key===(pendingJump?.key ?? jumpMissingKey));
-      const hint=jumpHintKey===undefined ? -1 : jumpOrder.findIndex(([key])=>key===jumpHintKey);
+      const hint=jumpActiveBoundaries.has(jumpHintKey) ? jumpOrder.findIndex(([key])=>key===jumpHintKey) : -1;
       const indexes=new Set([capacity===1 && hint>=0 && requested<0 && browse<0 ? hint : center]);
       if (requested>=0 && indexes.size<capacity) indexes.add(requested);
       if (hint>=0 && indexes.size<capacity) indexes.add(hint);
@@ -1374,7 +1401,7 @@
           bindJumpPreview(button,()=>jumpTimeline.posts.get(key)?.preview);
           jumpButtons.set(key,button);
         }
-        const refresh=jumpTimeline.refreshBoundaries.get(key);
+        const refresh=jumpActiveBoundaries.get(key);
         const fallback=refresh ? '跳到刷新前的帖子' : postIndex<jumpCurrentCount
           ? `跳到已加载的第 ${postIndex+2} 条帖子` : '跳到之前加载的帖子';
         setJumpLabel(button,post?.preview.text || '',fallback);
@@ -1403,7 +1430,7 @@
       },2200);
     }
     function positionJumpRefreshHint() {
-      const button=readingJumps.hidden ? undefined : jumpButtons.get(jumpHintKey);
+      const button=readingJumps.hidden || !jumpActiveBoundaries.has(jumpHintKey) ? undefined : jumpButtons.get(jumpHintKey);
       if (button!==jumpHintButton) {
         jumpHintButton?.classList.remove('xqc-jump-refresh-highlight');
         jumpHintButton=button;
@@ -1454,7 +1481,10 @@
           }
           entries.forEach(addPost);
           jumpEntries=entries;
-          jumpRanks={ranks,length:entries.length};
+          const keys=[...ranks.keys()];
+          const ownReplies=readJumpOwnReplies(keys);
+          const refreshKeys=ownReplies.size ? keys.filter(key=>!ownReplies.has(key)) : keys;
+          jumpRanks={ranks,keys,ownReplies,refreshKeys,length:entries.length};
         }
         return jumpRanks;
       }
@@ -1565,13 +1595,16 @@
       }
       rows.sort((a,b)=>a.top-b.top);
       const model=readJumpRanks();
-      const nativeFirst=model?.ranks.keys().next().value;
+      const nativeFirst=model?.keys[0];
       const first=rows[0];
       const atStart=first && window.scrollY<=1 && first.top<document.documentElement.clientHeight;
       const confirmedFirst=atStart && (!pendingJump?.first || !pendingJump.key || pendingJump.key===first.key);
       const firstKey=nativeFirst ?? (confirmedFirst ? first.key : undefined);
       const layout=region && layoutForJumpRegion(region,firstKey);
-      const refreshBoundary=rememberJumpRefresh(timeline,firstKey,rows,model);
+      const rowKeys=model ? undefined : rows.map(row=>row.key);
+      const ownReplies=model?.ownReplies ?? readJumpOwnReplies(rowKeys);
+      const refreshKeys=model?.refreshKeys ?? (confirmedFirst ? rowKeys.filter(key=>!ownReplies.has(key)) : undefined);
+      const refreshBoundary=rememberJumpRefresh(timeline,refreshKeys);
       if (refreshBoundary) startJumpRefreshHint(refreshBoundary);
       const postsChanged=rememberJumpPosts(rows,layout,model);
       const previousFirst=timeline.firstKey;
@@ -1580,7 +1613,7 @@
       readingJumps.style.left=`${left}px`;
       const orderChanged=timelineChanged || postsChanged || refreshBoundary || previousFirst!==timeline.firstKey ||
         model!==jumpOrderModel || layout!==jumpOrderLayout;
-      if (orderChanged) updateJumpOrder(timeline,layout,model);
+      if (orderChanged) updateJumpOrder(timeline,layout,model,ownReplies);
       const readingTop=homeReadingTop(feed);
       const current=(rows.find(row=>row.bottom>readingTop+1) || rows.at(-1))?.key;
       const readingChanged=current!==jumpReadingKey;
