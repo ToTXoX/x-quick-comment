@@ -897,15 +897,15 @@
     if (!nativeParent) layerObserver.observe(parent,{childList:true,subtree:true});
     else for (let node=parent;node;node=node.parentElement) layerObserver.observe(node,{childList:true});
   }
-  function pageElement(selector) {
+  function pageElement(selector, excluded) {
     return [...document.querySelectorAll(selector)].find(node =>
-      !sidebarHost?.contains(node) && node.getBoundingClientRect().width > 0);
+      !sidebarHost?.contains(node) && (!excluded || !node.closest(excluded)) && node.getBoundingClientRect().width > 0);
   }
   const primaryColumnSelector='[data-testid="primaryColumn"]';
-  function mainColumn() {
+  function mainColumn(excluded) {
     // A comma selector picks document order, not selector priority. On legacy X,
     // main contains BOTH primaryColumn and sidebarColumn.
-    return pageElement(primaryColumnSelector) || pageElement('main');
+    return pageElement(primaryColumnSelector,excluded) || pageElement('main',excluded);
   }
   function fiberOf(node) {
     const name = Object.keys(node).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactContainer$'));
@@ -964,9 +964,12 @@
     document.head.append(style);
     alignWithNativeLayers();
     const homePage=()=>/^\/home\/?$/.test(location.pathname);
+    const timelineSelector='[role="region"][aria-labelledby^="accessible-list-"],[role="feed"]';
+    const timelineCellSelector='[data-testid="cellInnerDiv"]';
+    const jumpExcluded='#layers,[role="dialog"],[role="alertdialog"],[aria-modal="true"],[aria-hidden="true"],[data-testid="toast"],[hidden],[inert]';
     const jumpButtons=new Map();
     const jumpResizeObserver=new ResizeObserver(scheduleReadingJumps);
-    let jumpFrame=0, jumpFeed, jumpTimeline, jumpCurrent, pendingJump, jumpRetryTimer, jumpContentChanged=true;
+    let jumpFrame=0, jumpFeed, jumpRegion, jumpTimeline, jumpCurrent, pendingJump, jumpRetryTimer, jumpContentChanged=true;
     let jumpMounted=new Map();
     let jumpOrder=[], jumpLimit=0, jumpReadingKey, jumpBrowseKey, jumpWheelDelta=0;
     let jumpPreviewButton, jumpPreviewTimer;
@@ -1002,7 +1005,7 @@
     }
     function jumpToPost(key) {
       const row=jumpMounted.get(key);
-      if (!row || !jumpFeed?.contains(row) || jumpPostKey(row)!==key) return false;
+      if (!row || !isJumpTimelineRow(row) || jumpPostKey(row)!==key) return false;
       const {top,width,height}=row.getBoundingClientRect();
       if (!width || !height) return false;
       window.scrollBy({top:top-homeReadingTop(jumpFeed),behavior:'instant'});
@@ -1255,8 +1258,27 @@
       jumpCurrent=button;
       button?.setAttribute('aria-current','true');
     }
+    function overlapsReadingColumn(rect, column) {
+      return rect.width>0 && rect.right>Math.max(0,column.left) && rect.left<Math.min(window.innerWidth,column.right);
+    }
+    function homeTimelineRegion(feed,box) {
+      const regions=feed.querySelectorAll(timelineSelector);
+      if (!regions.length) return feed;
+      // X's TimelineRenderer wraps its actual entries in an accessible-list region.
+      return [...regions].find(region=>!region.closest(jumpExcluded) &&
+        !feed.contains(region.parentElement.closest(timelineSelector)) &&
+        getComputedStyle(region).visibility==='visible' && overlapsReadingColumn(region.getBoundingClientRect(),box));
+    }
+    function isJumpTimelineRow(row) {
+      if (!jumpRegion?.contains(row) || row.closest(jumpExcluded) ||
+          row.parentElement.closest(`${tweetSelector},[data-testid="quoteTweet"],[data-testid="sidebarColumn"]`)) return false;
+      // Older layouts can still identify timeline cells without an accessible-list wrapper.
+      return jumpRegion===jumpFeed ? jumpFeed.contains(row.closest(timelineCellSelector)) : row.closest(timelineSelector)===jumpRegion;
+    }
     function syncReadingJumps() {
-      const feed=homePage() ? mainColumn() : undefined;
+      const feed=homePage() ? mainColumn(jumpExcluded) : undefined;
+      const box=feed?.getBoundingClientRect();
+      const region=feed && homeTimelineRegion(feed,box);
       const timeline=feed && timelineForFeed(feed);
       const timelineChanged=timeline!==jumpTimeline;
       if (timelineChanged) {
@@ -1271,27 +1293,30 @@
         jumpList.replaceChildren();
         hideJumpPreview();
       }
-      if (feed!==jumpFeed) {
+      if (feed!==jumpFeed || region!==jumpRegion) {
         jumpResizeObserver.disconnect();
         if (feed) jumpResizeObserver.observe(feed);
+        if (region && region!==feed) jumpResizeObserver.observe(region);
         jumpFeed=feed;
+        jumpRegion=region;
       }
       if (!timeline) {
         readingJumps.hidden=true;
         jumpMounted.clear();
         return;
       }
-      const left=feed.getBoundingClientRect().left;
+      const left=box.left;
       const rows=[];
       const seen=new Set();
-      for (const row of feed.querySelectorAll(tweetSelector)) {
-        if (row.parentElement.closest(`${tweetSelector},[data-testid="quoteTweet"],[data-testid="sidebarColumn"]`)) continue;
-        const {top,bottom,width,height}=row.getBoundingClientRect();
-        if (!width || !height) continue;
+      const rowSelector=region===feed ? `${timelineCellSelector} ${tweetSelector}` : tweetSelector;
+      for (const row of region?.querySelectorAll(rowSelector) || []) {
+        if (!isJumpTimelineRow(row) || getComputedStyle(row).visibility!=='visible') continue;
+        const rect=row.getBoundingClientRect();
+        if (!rect.height || !overlapsReadingColumn(rect,box)) continue;
         const key=jumpPostKey(row);
         if (!key || seen.has(key)) continue;
         seen.add(key);
-        rows.push({key,row,top,bottom});
+        rows.push({key,row,top:rect.top,bottom:rect.bottom});
       }
       rows.sort((a,b)=>a.top-b.top);
       const postsChanged=rememberJumpPosts(rows);
@@ -1300,7 +1325,7 @@
       const atStart=first && window.scrollY<=1 && first.top<document.documentElement.clientHeight;
       const previousFirst=timeline.firstKey;
       if (atStart && (!pendingJump?.first || !pendingJump.key || pendingJump.key===first.key)) timeline.firstKey=first.key;
-      readingJumps.hidden=left<24 || (!timeline.posts.size && window.scrollY<=0);
+      readingJumps.hidden=left<24 || !region || (!timeline.posts.size && window.scrollY<=0);
       readingJumps.style.left=`${left}px`;
       const orderChanged=timelineChanged || postsChanged || previousFirst!==timeline.firstKey;
       if (orderChanged) jumpOrder=[...timeline.posts].filter(([key])=>key!==timeline.firstKey).sort((a,b)=>a[1].top-b[1].top);

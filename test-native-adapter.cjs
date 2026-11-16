@@ -117,7 +117,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       function NotificationsContent(){const [count,set]=R.useState(0);R.useEffect(()=>{mounts++;window.notificationMounts=mounts;},[]);return R.createElement('main',null,R.createElement('section',{'data-testid':'primaryColumn'},
         R.createElement('button',{id:'increment',onClick:()=>set(count+1)},'count '+count),
         R.createElement('output',{id:'main-store-state'},Redux.d4(state=>state.timelineRevision)),
-        R.createElement(NotificationRows),
+        R.createElement('div',{id:'fixture-timeline',role:'region','aria-labelledby':'accessible-list-fixture'},R.createElement(NotificationRows)),
         ...['alice','bob','broken','hanging','slow','updates'].map(name=>R.createElement('a',{href:'/'+name,key:name},R.createElement('span',{'data-testid':'UserAvatar-Container-'+name},name)))));}
       // Real connect() inserts a nested subscription into the context copied
       // by the sidebar. Unmounting its owner must not strand the sidebar.
@@ -492,9 +492,10 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       },selector);
       await page.evaluate(firstAvatar=>{
         const feed=document.querySelector('#app [data-testid="primaryColumn"]');
+        const timeline=feed.querySelector('#fixture-timeline');
         feed.style.marginLeft='64px';
-        feed.insertAdjacentHTML('afterbegin',`<div id="fixture-home-tabs" style="position:sticky;top:0;height:53px"><div role="tablist">For you</div></div>
-          <div id="fixture-home-ads"><article data-testid="tweet" style="height:80px"><span data-testid="promotedIndicator">广告</span>
+        feed.insertAdjacentHTML('afterbegin','<div id="fixture-home-tabs" style="position:sticky;top:0;height:53px"><div role="tablist">For you</div></div>');
+        timeline.insertAdjacentHTML('afterbegin',`<div id="fixture-home-ads"><article data-testid="tweet" style="height:80px"><span data-testid="promotedIndicator">广告</span>
           <div data-testid="tweetText">带推广标记的帖子</div></article><div id="fixture-react-ad"></div></div>`);
         const R=fixtureRequire(174394),DOM=fixtureRequire(214659);
         function FixtureAd(){return R.createElement('article',{'data-testid':'tweet',style:{height:80}},
@@ -512,7 +513,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         later.firstElementChild.querySelector('[data-testid="tweetText"]').append('，聊聊广告');
         later.querySelector('#fixture-home-tweet-8').insertAdjacentHTML('afterbegin',
           '<div data-testid="Tweet-User-Avatar"><img width="28" height="28" src="https://pbs.twimg.com/profile_images/8/alice.png"></div><div data-testid="User-Name"><a href="/alice">Alice</a><a href="/alice">@alice</a></div><div data-testid="tweetPhoto"></div>');
-        feed.append(later);
+        timeline.append(later);
         window.scrollTo(0,0);
       },firstAvatar);
       await page.locator('#fixture-react-ad article').waitFor();
@@ -529,6 +530,21 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       assert.equal(await jumpRail.getByRole('button',{name:/聊聊广告/}).count(),1);
       assert.equal(await jumpRail.evaluate(el=>el.getBoundingClientRect().right),64);
       assert.equal(await firstJump.getAttribute('aria-current'),'true');
+      // A reply confirmation can still have a tweet node in the primary column after the composer closes.
+      await page.evaluate(()=>history.replaceState(history.state,'','/compose/post'));
+      await jumpRail.waitFor({state:'hidden'});
+      await page.evaluate(()=>{
+        history.replaceState(history.state,'','/home');
+        const feed=document.querySelector('#app [data-testid="primaryColumn"]');
+        feed.insertAdjacentHTML('beforeend',`<div id="fixture-reply-confirmation" style="position:fixed;left:100px;top:115px;width:260px">
+          <article data-testid="tweet"><a href="/owner/status/2001"><time>刚刚</time></a>
+          <div data-testid="tweetText">刚发出的临时回复预览</div></article></div>`);
+      });
+      await jumpRail.waitFor();
+      await page.locator('#fixture-reply-confirmation').evaluate(el=>el.remove());
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      assert.equal(await jumpRail.getByRole('button',{name:/刚发出的临时回复预览/}).count(),0);
+      assert.equal(await jumpRail.getByRole('button',{name:'跳到 谢谢，我也这样做',exact:true}).count(),1);
       await targetJump.hover();
       await jumpPreview.waitFor();
       assert.equal(await targetJump.getAttribute('aria-describedby'),'xqc-jump-preview');
