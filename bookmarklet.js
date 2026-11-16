@@ -53,7 +53,7 @@
   if (!supportedPage()) {
     alert('请打开 X 首页、通知页、用户主页或帖子页，再点击 Peekala 书签'); return;
   }
-  const version = '3.72';
+  const version = '3.73';
   const stickerPackVersion = 1;
   const peekalaMark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <path fill="#b8b6b3" d="M41 46c-4 2-7 3-11 2-2 0-3 2-1 4 3 3 8 4 12 2l4-3zm5 7c-1 3 0 5-2 7-1 2 1 3 3 2 4-1 6-5 7-9z"/>
@@ -798,11 +798,13 @@
     }};
   }
 
-  function tweetId(tweet) {
+  function tweetPermalink(tweet) {
     const links=[...tweet?.querySelectorAll('a[href*="/status/"]') || []].filter(link=>
       !link.closest('[data-testid="quoteTweet"],.xqc-reply-context') && link.closest('[data-testid="tweet"]')===tweet);
-    const permalink=links.find(link=>link.querySelector('time')) || links[0];
-    return permalink?.pathname.match(/\/status\/(\d+)/)?.[1];
+    return links.find(link=>link.querySelector('time')) || links[0];
+  }
+  function tweetId(tweet) {
+    return tweetPermalink(tweet)?.pathname.match(/\/status\/(\d+)/)?.[1];
   }
 
   function onLikeClick(event) {
@@ -915,6 +917,7 @@
   function startReadingJumps() {
     const homeJumpTimelines=new Map();
     const homeJumpRowKeys=new WeakMap();
+    const jumpLayouts=new WeakMap();
     const jumpMarkHeight=18;
     let disposed=false;
     readingJumps=document.createElement('nav');
@@ -925,12 +928,15 @@
     jumpPreview.id='xqc-jump-preview';
     jumpPreview.setAttribute('role','tooltip');
     jumpPreview.hidden=true;
-    jumpPreview.innerHTML='<div><img width="28" height="28" alt="" referrerpolicy="no-referrer" hidden><strong></strong><span></span></div><p></p><small></small>';
+    jumpPreview.innerHTML='<div><img width="28" height="28" alt="" referrerpolicy="no-referrer" hidden><strong></strong><span></span></div><p></p><small></small><div class="xqc-jump-missing" hidden><span></span><a target="_blank" rel="noopener noreferrer">打开原帖</a></div>';
     const jumpPreviewAvatar=jumpPreview.querySelector('img');
     const jumpPreviewAuthor=jumpPreview.querySelector('strong');
     const jumpPreviewHandle=jumpPreview.querySelector('span');
     const jumpPreviewText=jumpPreview.querySelector('p');
     const jumpPreviewMedia=jumpPreview.querySelector('small');
+    const jumpMissing=jumpPreview.querySelector('.xqc-jump-missing');
+    const jumpMissingMessage=jumpMissing.querySelector('span');
+    const jumpMissingLink=jumpMissing.querySelector('a');
     const firstJump=document.createElement('button');
     firstJump.type='button';
     const firstJumpLabel='跳到第一条帖子';
@@ -947,6 +953,7 @@
       #xqc-reading-jumps button:is(:hover,:focus-visible,[aria-current])::after{background:#1d9bf0}
       #xqc-reading-jumps button[aria-current]::after{width:13px}
       #xqc-reading-jumps button:focus-visible{outline:2px solid #1d9bf0;outline-offset:-2px}
+      #xqc-reading-jumps button.xqc-jump-history-start{border-top:1px solid color-mix(in srgb,CanvasText 30%,transparent);border-radius:0 0 4px 4px}
       #xqc-jump-preview{position:fixed;z-index:100;box-sizing:border-box;max-height:calc(100vh - 16px);overflow:hidden;padding:12px 14px;border:1px solid color-mix(in srgb,CanvasText 16%,transparent);border-radius:15px;background:light-dark(#fff,#1b232c);color:CanvasText;color-scheme:light dark;box-shadow:0 8px 24px #0002;font:14px/1.45 system-ui;overflow-wrap:anywhere}
       #xqc-jump-preview[hidden],#xqc-jump-preview [hidden],#xqc-jump-preview :is(span,p,small):empty{display:none}
       #xqc-jump-preview div{display:flex;align-items:center;gap:6px;min-width:0}
@@ -956,6 +963,9 @@
       #xqc-jump-preview p{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;white-space:pre-line;margin:0}
       #xqc-jump-preview div:not([hidden])+p:not(:empty){margin-top:5px}
       #xqc-jump-preview small{display:block;margin-top:5px;font-size:12px;opacity:.7}
+      #xqc-jump-preview .xqc-jump-missing{margin-top:9px;gap:8px;flex-wrap:wrap}
+      #xqc-jump-preview .xqc-jump-missing span{flex:0 1 auto}
+      #xqc-jump-preview .xqc-jump-missing a{color:LinkText;font-weight:600}
       @media (forced-colors:active){
         #xqc-reading-jumps button::after{background:ButtonText;forced-color-adjust:none}
         #xqc-reading-jumps button[aria-current]::after{background:Highlight}
@@ -971,8 +981,10 @@
     const jumpResizeObserver=new ResizeObserver(scheduleReadingJumps);
     let jumpFrame=0, jumpFeed, jumpRegion, jumpTimeline, jumpCurrent, pendingJump, jumpRetryTimer, jumpContentChanged=true;
     let jumpMounted=new Map();
-    let jumpOrder=[], jumpLimit=0, jumpReadingKey, jumpBrowseKey, jumpWheelDelta=0;
-    let jumpPreviewButton, jumpPreviewTimer;
+    let jumpEntries, jumpRanks;
+    let jumpOrder=[], jumpCurrentCount=0, jumpOrderModel, jumpOrderLayout;
+    let jumpLimit=0, jumpReadingKey, jumpBrowseKey, jumpWheelDelta=0;
+    let jumpPreviewButton, jumpPreviewTimer, jumpMissingKey;
     jumpPreviewAvatar.onerror=()=>{
       jumpPreviewAvatar.hidden=true;
       jumpPreviewAuthor.parentElement.hidden=!jumpPreviewAuthor.textContent && !jumpPreviewHandle.textContent;
@@ -984,6 +996,7 @@
     jumpPreview.onpointerleave=()=>{
       if (!jumpPreviewButton?.matches(':focus-visible')) queueHideJumpPreview();
     };
+    jumpPreview.onfocusout=()=>queueHideJumpPreview();
     function onJumpPageUpdate() {
       if (homePage()) jumpContentChanged=true;
       scheduleReadingJumps();
@@ -1013,7 +1026,10 @@
       return true;
     }
     function scrollToPendingJump(top) {
-      pendingJump.top=Math.max(0,top);
+      const root=document.scrollingElement || document.documentElement;
+      const target=Math.max(0,Math.min(top,root.scrollHeight-window.innerHeight));
+      if (pendingJump.attempts && Math.abs(target-pendingJump.top)<1) return;
+      pendingJump.top=target;
       pendingJump.attempts++;
       window.scrollTo({top:pendingJump.top,behavior:'instant'});
       scheduleReadingJumps();
@@ -1021,16 +1037,12 @@
     function requestPostJump(key,first=false) {
       if (!homePage() || !jumpTimeline || !jumpFeed) return;
       hideJumpPreview();
-      pendingJump=undefined;
-      if (jumpToPost(key)) return;
-      const post=jumpTimeline.posts.get(key);
-      if (!post && !first) return;
-      // A virtualized post needs to be mounted by X before we can align it precisely.
-      pendingJump={key,first,deadline:performance.now()+2500,attempts:0};
-      scrollToPendingJump(first ? 0 : post.top-homeReadingTop(jumpFeed));
+      pendingJump={key,first,deadline:performance.now()+2500,attempts:0,origin:window.scrollY};
+      scheduleReadingJumps();
     }
     function cancelPendingJump(event) {
       if (event.type!=='wheel' || !readingJumps.contains(event.target)) pendingJump=undefined;
+      if (event.type==='pointerdown' && jumpMissingKey && !jumpPreview.contains(event.target)) hideJumpPreview();
     }
     function jumpPostPart(row,selector) {
       return [...row.querySelectorAll(selector)].find(node=>
@@ -1083,6 +1095,7 @@
       clearTimeout(jumpPreviewTimer);
       jumpPreviewButton?.removeAttribute('aria-describedby');
       jumpPreviewButton=undefined;
+      jumpMissingKey=undefined;
       jumpPreview.hidden=true;
     }
     function dismissJumpPreview(event) {
@@ -1097,7 +1110,8 @@
       if (!button || button!==jumpPreviewButton) return;
       clearTimeout(jumpPreviewTimer);
       jumpPreviewTimer=setTimeout(()=>{
-        if (!button.matches(':hover,:focus-visible') && !jumpPreview.matches(':hover')) hideJumpPreview();
+        if (!button.matches(':hover,:focus-visible') && !jumpPreview.matches(':hover') &&
+            !jumpPreview.contains(document.activeElement)) hideJumpPreview();
       },150);
     }
     function positionJumpPreview() {
@@ -1117,11 +1131,26 @@
       const top=(anchor.top+anchor.bottom-height)/2;
       jumpPreview.style.top=`${Math.max(gap,Math.min(top,clientHeight-height-gap))}px`;
     }
-    function showJumpPreview(button,post) {
-      if (!homePage() || readingJumps.hidden || !post || !Object.values(post).some(Boolean)) return hideJumpPreview();
+    function showJumpPreview(button,post,missing) {
+      if (!missing && (pendingJump || (jumpMissingKey && jumpPreview.contains(document.activeElement)))) return;
+      if (!homePage() || readingJumps.hidden || !post || (!missing && !Object.values(post).some(Boolean))) return hideJumpPreview();
       clearTimeout(jumpPreviewTimer);
-      if (jumpPreviewButton!==button) jumpPreviewButton?.removeAttribute('aria-describedby');
+      jumpPreviewButton?.removeAttribute('aria-describedby');
       jumpPreviewButton=button;
+      jumpMissingKey=missing?.key;
+      jumpMissing.hidden=!missing;
+      if (missing) {
+        jumpMissingMessage.textContent=missing.message;
+        jumpMissingLink.hidden=!missing.href;
+        if (missing.href) jumpMissingLink.href=missing.href;
+        else jumpMissingLink.removeAttribute('href');
+        jumpPreview.setAttribute('role',missing.href ? 'dialog' : 'status');
+        jumpPreview.setAttribute('aria-label','帖子定位');
+      } else {
+        jumpPreview.setAttribute('role','tooltip');
+        jumpPreview.removeAttribute('aria-label');
+        button.setAttribute('aria-describedby',jumpPreview.id);
+      }
       const {author,handle,avatar,text,media}=post;
       jumpPreviewAuthor.textContent=author;
       jumpPreviewHandle.textContent=handle;
@@ -1133,8 +1162,8 @@
       const rgb=getComputedStyle(document.body).backgroundColor.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
       jumpPreview.style.colorScheme=rgb ? (Number(rgb[1])+Number(rgb[2])+Number(rgb[3])<384 ? 'dark' : 'light') : '';
       jumpPreview.hidden=false;
-      button.setAttribute('aria-describedby',jumpPreview.id);
       positionJumpPreview();
+      if (missing?.href) jumpMissingLink.focus({preventScroll:true});
     }
     function bindJumpPreview(button,getPost) {
       button.onpointerenter=event=>{
@@ -1151,20 +1180,34 @@
       if (!homeJumpTimelines.has(key)) homeJumpTimelines.set(key,{posts:new Map(),firstKey:undefined});
       return homeJumpTimelines.get(key);
     }
-    function rememberJumpPosts(rows) {
+    function layoutForJumpRegion(region,firstKey) {
+      let layout=jumpLayouts.get(region);
+      if (!layout || (firstKey && layout.firstKey && firstKey!==layout.firstKey)) {
+        layout={id:Symbol(),firstKey};
+        jumpLayouts.set(region,layout);
+      } else if (firstKey) layout.firstKey=firstKey;
+      return layout.id;
+    }
+    function originalJumpLink(row,key) {
+      if (typeof key!=='string') return '';
+      const link=tweetPermalink(row);
+      return link?.origin===location.origin && link.pathname.match(/\/status\/(\d+)\/?$/)?.[1]===key
+        ? link.pathname : `/i/web/status/${key}`;
+    }
+    function rememberJumpPosts(rows,layout,model) {
       const {posts}=jumpTimeline;
       const previousMounted=jumpMounted;
       jumpMounted=new Map(rows.map(({key,row})=>[key,row]));
       const scrollY=window.scrollY;
-      let changed=false;
-      const known=rows.filter(({key})=>posts.has(key));
+      let changed=!!model && [...previousMounted.keys()].some(key=>!model.ranks.has(key) && !jumpMounted.has(key));
+      const known=rows.filter(({key})=>posts.get(key)?.layout===layout);
       if (known.length) {
         const first=known[0],last=known.at(-1);
         const before=posts.get(first.key).top,after=posts.get(last.key).top;
         const beforeShift=scrollY+first.top-before,afterShift=scrollY+last.top-after;
         if (Math.abs(beforeShift)>=1 || Math.abs(afterShift)>=1) {
           // Keep cached positions useful when content above a mounted post changes height.
-          for (const [key,post] of posts) if (!jumpMounted.has(key)) {
+          for (const [key,post] of posts) if (post.layout===layout && !jumpMounted.has(key)) {
             post.top+=post.top<=(before+after)/2 ? beforeShift : afterShift;
           }
           changed=true;
@@ -1174,7 +1217,7 @@
         const position=scrollY+top;
         const post=posts.get(key);
         if (!post) {
-          posts.set(key,{top:position,preview:readJumpPreview(row)});
+          posts.set(key,{top:position,layout,href:originalJumpLink(row,key),preview:readJumpPreview(row)});
           changed=true;
           continue;
         }
@@ -1183,11 +1226,35 @@
           if (text!==post.preview.text) changed=true;
           post.preview=readJumpPreview(row,text);
         }
-        if (Math.abs(post.top-position)>=1) changed=true;
+        if (post.layout!==layout || Math.abs(post.top-position)>=1 ||
+            (model && !model.ranks.has(key) && !previousMounted.has(key))) changed=true;
         post.top=position;
+        post.layout=layout;
       }
       jumpContentChanged=false;
       return changed;
+    }
+    function updateJumpOrder(timeline,layout,model) {
+      const history=new Map(timeline.posts);
+      history.delete(timeline.firstKey);
+      const current=[];
+      function include(key) {
+        const post=history.get(key);
+        if (!post) return;
+        current.push([key,post]);
+        history.delete(key);
+      }
+      if (model) {
+        for (const key of model.ranks.keys()) include(key);
+        for (const key of jumpMounted.keys()) include(key);
+      } else if (layout) {
+        const sameLayout=[...history].filter(([,post])=>post.layout===layout).sort((a,b)=>a[1].top-b[1].top);
+        for (const [key] of sameLayout) include(key);
+      }
+      jumpCurrentCount=current.length;
+      jumpOrder=[...current,...history];
+      jumpOrderModel=model;
+      jumpOrderLayout=layout;
     }
     function jumpNeighborhoodSize() {
       return Math.max(1,Math.min(5,jumpLimit-3));
@@ -1200,8 +1267,11 @@
       const browse=jumpOrder.findIndex(([key])=>key===jumpBrowseKey);
       const center=browse>=0 ? browse : Math.max(0,current);
       const indexes=new Set([center]);
-      if (capacity>=2) indexes.add(count-1);
+      if (capacity>=2) indexes.add(jumpCurrentCount ? jumpCurrentCount-1 : count-1);
       if (capacity>=3 && current>=0) indexes.add(current);
+      const requested=jumpOrder.findIndex(([key])=>key===(pendingJump?.key ?? jumpMissingKey));
+      if (requested>=0 && indexes.size<capacity) indexes.add(requested);
+      if (jumpCurrentCount<count && indexes.size<capacity) indexes.add(count-1);
       const near=jumpNeighborhoodSize();
       const start=Math.max(0,Math.min(center-Math.floor(near/2),count-near));
       for (let i=start;i<start+near && indexes.size<capacity;i++) indexes.add(i);
@@ -1231,6 +1301,7 @@
       const first=jumpTimeline.posts.get(jumpTimeline.firstKey);
       setJumpLabel(firstJump,first?.preview.text || '',firstJumpLabel);
       const indexes=jumpMarkIndexes();
+      const historyStart=indexes.find(index=>index>=jumpCurrentCount);
       const visible=new Set(indexes.map(index=>jumpOrder[index][0]));
       for (const [key,button] of jumpButtons) if (!visible.has(key)) {
         button.remove();
@@ -1246,7 +1317,10 @@
           bindJumpPreview(button,()=>post.preview);
           jumpButtons.set(key,button);
         }
-        setJumpLabel(button,post.preview.text,`跳到已加载的第 ${postIndex+2} 条帖子`);
+        const fallback=postIndex<jumpCurrentCount
+          ? `跳到已加载的第 ${postIndex+2} 条帖子` : '跳到之前加载的帖子';
+        setJumpLabel(button,post.preview.text,fallback);
+        button.classList.toggle('xqc-jump-history-start',postIndex===historyStart);
         const slot=jumpList.children[slotIndex];
         if (slot!==button) jumpList.insertBefore(button,slot || null);
       }
@@ -1275,6 +1349,88 @@
       // Older layouts can still identify timeline cells without an accessible-list wrapper.
       return jumpRegion===jumpFeed ? jumpFeed.contains(row.closest(timelineCellSelector)) : row.closest(timelineSelector)===jumpRegion;
     }
+    function readJumpRanks() {
+      if (!jumpRegion) return;
+      for (let fiber=fiberOf(jumpRegion);fiber;fiber=fiber.return) {
+        const props=fiber.stateNode?.props || fiber.memoizedProps;
+        if (typeof props?.timelineId!=='string' || !Array.isArray(props.entries)) continue;
+        const {entries}=props;
+        if (entries!==jumpEntries) {
+          const ranks=new Map();
+          function addPost(entry,rank) {
+            const promoted=entry?.content?.promotedMetadata;
+            if (entry?.type==='tweet' && (!promoted || String(promoted.disclosure_type).toLowerCase()==='earned')) {
+              const id=entry.content?.id ?? entry.entryId?.match(/^tweet-(\d+)$/)?.[1];
+              if (/^\d+$/.test(id) && !ranks.has(String(id))) ranks.set(String(id),rank);
+            }
+            if (Array.isArray(entry?.content?.items)) for (const item of entry.content.items) addPost(item,rank);
+          }
+          entries.forEach(addPost);
+          jumpEntries=entries;
+          jumpRanks={ranks,length:entries.length};
+        }
+        return jumpRanks;
+      }
+    }
+    function indexedJumpTop(model,key,rows) {
+      const rank=model.ranks.get(key);
+      if (pendingJump.search?.model!==model) pendingJump.search={model};
+      const search=pendingJump.search;
+      for (const row of rows) {
+        const index=model.ranks.get(row.key);
+        if (index<rank && (!search.before || index+1>=search.before.index)) {
+          search.before={index:index+1,top:window.scrollY+row.bottom};
+        }
+        if (index>rank && (!search.after || index<=search.after.index)) {
+          search.after={index,top:window.scrollY+row.top};
+        }
+      }
+      const region=jumpRegion.getBoundingClientRect();
+      const start={index:0,top:window.scrollY+region.top};
+      const end={index:model.length,top:window.scrollY+region.bottom};
+      let before=search.before || start, after=search.after || end;
+      if (after.top<=before.top || after.index<=before.index) {
+        before=start;
+        after=end;
+      }
+      return before.top+(after.top-before.top)*(rank-before.index)/Math.max(1,after.index-before.index);
+    }
+    function showJumpMissing(key,message) {
+      const jump=pendingJump;
+      pendingJump=undefined;
+      if (jump.attempts && window.scrollY!==jump.origin) window.scrollTo({top:jump.origin,behavior:'instant'});
+      const post=jumpTimeline.posts.get(key);
+      if (!post) return;
+      jumpMissingKey=key;
+      renderJumpMarks();
+      const button=key===jumpTimeline.firstKey ? firstJump : jumpButtons.get(key) || firstJump;
+      showJumpPreview(button,post.preview,{key,href:post.href,message});
+    }
+    function continuePostJump(rows,layout,readingTop,model) {
+      if (!pendingJump) return;
+      const key=pendingJump.key ?? jumpTimeline.firstKey;
+      if (key && jumpToPost(key)) {
+        pendingJump=undefined;
+        return;
+      }
+      if (performance.now()>=pendingJump.deadline) return showJumpMissing(key,'这条帖子暂时无法定位。');
+      let target;
+      if (jumpRegion) {
+        const post=jumpTimeline.posts.get(key);
+        if (model && typeof key==='string') {
+          if (!model.ranks.has(key)) return showJumpMissing(key,'当前时间线找不到这条帖子。');
+          target=indexedJumpTop(model,key,rows)-readingTop;
+        } else if (post && post.layout===layout) {
+          target=pendingJump.first ? 0 : post.top-readingTop;
+        } else if (pendingJump.first && !key) target=0;
+        else return showJumpMissing(key,'当前时间线无法确认帖子的位置。');
+      }
+      if (Number.isFinite(target) && pendingJump.attempts<8) scrollToPendingJump(target);
+      if (!jumpRetryTimer) jumpRetryTimer=setTimeout(()=>{
+        jumpRetryTimer=undefined;
+        if (pendingJump) scheduleReadingJumps();
+      },100);
+    }
     function syncReadingJumps() {
       const feed=homePage() ? mainColumn(jumpExcluded) : undefined;
       const box=feed?.getBoundingClientRect();
@@ -1299,6 +1455,7 @@
         if (region && region!==feed) jumpResizeObserver.observe(region);
         jumpFeed=feed;
         jumpRegion=region;
+        jumpEntries=jumpRanks=undefined;
       }
       if (!timeline) {
         readingJumps.hidden=true;
@@ -1319,16 +1476,21 @@
         rows.push({key,row,top:rect.top,bottom:rect.bottom});
       }
       rows.sort((a,b)=>a.top-b.top);
-      const postsChanged=rememberJumpPosts(rows);
-      if (pendingJump && performance.now()>=pendingJump.deadline) pendingJump=undefined;
+      const model=readJumpRanks();
+      const nativeFirst=model?.ranks.keys().next().value;
       const first=rows[0];
       const atStart=first && window.scrollY<=1 && first.top<document.documentElement.clientHeight;
+      const confirmedFirst=atStart && (!pendingJump?.first || !pendingJump.key || pendingJump.key===first.key);
+      const firstKey=nativeFirst ?? (confirmedFirst ? first.key : undefined);
+      const layout=region && layoutForJumpRegion(region,firstKey);
+      const postsChanged=rememberJumpPosts(rows,layout,model);
       const previousFirst=timeline.firstKey;
-      if (atStart && (!pendingJump?.first || !pendingJump.key || pendingJump.key===first.key)) timeline.firstKey=first.key;
+      if (firstKey || layout!==timeline.posts.get(previousFirst)?.layout) timeline.firstKey=firstKey;
       readingJumps.hidden=left<24 || !region || (!timeline.posts.size && window.scrollY<=0);
       readingJumps.style.left=`${left}px`;
-      const orderChanged=timelineChanged || postsChanged || previousFirst!==timeline.firstKey;
-      if (orderChanged) jumpOrder=[...timeline.posts].filter(([key])=>key!==timeline.firstKey).sort((a,b)=>a[1].top-b[1].top);
+      const orderChanged=timelineChanged || postsChanged || previousFirst!==timeline.firstKey ||
+        model!==jumpOrderModel || layout!==jumpOrderLayout;
+      if (orderChanged) updateJumpOrder(timeline,layout,model);
       const readingTop=homeReadingTop(feed);
       const current=(rows.find(row=>row.bottom>readingTop+1) || rows.at(-1))?.key;
       const readingChanged=current!==jumpReadingKey;
@@ -1343,19 +1505,7 @@
       if (orderChanged || readingChanged || limitChanged) renderJumpMarks();
       selectCurrentJump(current);
       positionJumpPreview();
-      if (!pendingJump) return;
-      const key=pendingJump.key ?? timeline.firstKey;
-      if (key && jumpToPost(key)) {
-        pendingJump=undefined;
-        return;
-      }
-      const post=timeline.posts.get(key);
-      const target=Math.max(0,(post?.top ?? 0)-readingTop);
-      if (!pendingJump.first && pendingJump.attempts<3 && Math.abs(target-pendingJump.top)>=1) scrollToPendingJump(target);
-      if (!jumpRetryTimer) jumpRetryTimer=setTimeout(()=>{
-        jumpRetryTimer=undefined;
-        if (pendingJump) scheduleReadingJumps();
-      },100);
+      continuePostJump(rows,layout,readingTop,model);
     }
     pageUpdates.add(onJumpPageUpdate);
     window.addEventListener('popstate',onJumpPageUpdate);

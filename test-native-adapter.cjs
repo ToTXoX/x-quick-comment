@@ -6,6 +6,118 @@ const path = require('node:path');
 const dir = process.env.XQC_TEST_ASSETS || path.join(process.env.TEMP, 'xqc-local-test');
 const bundle = process.env.XQC_TEST_BUNDLE === 'current' ? 'x-current' : 'x-live';
 const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
+async function testRefreshedJumpRail(browser,source) {
+  for (const {moved,replace,withEntries,suppressTarget} of [
+    {moved:true,replace:true,withEntries:true},
+    {moved:true,replace:false,withEntries:true},
+    {moved:false,replace:true,withEntries:true},
+    {moved:false,replace:true,withEntries:false},
+    {moved:false,replace:false,withEntries:false},
+    {moved:true,replace:true,withEntries:true,suppressTarget:true}
+  ]) {
+    const page=await browser.newPage({viewport:{width:1400,height:900}});
+    try {
+      await page.context().route('https://x.com/**',route=>{
+        if (new URL(route.request().url()).pathname!=='/home') return route.fulfill({contentType:'text/html',body:'Original post'});
+        return route.fulfill({contentType:'text/html; charset=utf-8',body:`<!doctype html><style>
+          html{overflow-anchor:none}body{margin:0}main{width:660px;margin-left:96px}
+          #jump-tabs{position:sticky;top:0;height:53px;background:white;z-index:2}
+          [role="region"]{position:relative}article{position:absolute;left:0;right:0}
+          </style><main data-testid="primaryColumn"><div id="jump-tabs"><div role="tablist">
+          <button role="tab" aria-selected="true">For you</button></div></div>
+          <div role="region" aria-labelledby="accessible-list-refresh"></div></main>`});
+      });
+      await page.goto('https://x.com/home');
+      const target=1008;
+      await page.evaluate(({target,moved,replace,withEntries,suppressTarget})=>{
+        let region=document.querySelector('[role="region"]'),items=[],all=true,frame;
+        function setItems(ids){
+          let top=0;
+          items=ids.map((id,index)=>{
+            const height=150+(index%7)*34;
+            const item={id,top,height};
+            top+=height;
+            return item;
+          });
+          region.style.height=top+'px';
+          if (withEntries) region.__reactFiber$fixture={return:{stateNode:{props:{timelineId:'home',entries:ids.map(id=>
+            ({entryId:'tweet-'+id,type:'tweet',content:{id:String(id)}}))}}}};
+        }
+        function render(){
+          const visible=items.filter(item=>all || ((!suppressTarget || item.id!==target) &&
+            item.top+item.height+53>scrollY-150 && item.top+53<scrollY+innerHeight+150));
+          const mounted=new Map([...region.children].map(node=>[Number(node.dataset.id),node]));
+          const keys=new Set(visible.map(item=>item.id));
+          for (const [id,node] of mounted) if (!keys.has(id)) node.remove();
+          for (const {id,top,height} of visible) {
+            const node=mounted.get(id) || document.createElement('article');
+            if (!node.isConnected) {
+              node.dataset.testid='tweet';
+              node.dataset.id=id;
+              node.innerHTML='<a href="/alice/status/'+id+'"><time>Now</time></a><div data-testid="tweetText">Post '+id+'</div>';
+              region.append(node);
+            }
+            node.style.top=top+'px';
+            node.style.height=height+'px';
+          }
+        }
+        window.fixtureRefreshJumpList=()=>{
+          all=false;
+          if (replace) {
+            const next=region.cloneNode(false);
+            region.replaceWith(next);
+            region=next;
+          }
+          const next=Array.from({length:32},(_,index)=>2001+index);
+          if (moved) {
+            next[21]=1013;
+            next[22]=target;
+          }
+          setItems(next);
+          render();
+        };
+        window.addEventListener('scroll',()=>{
+          if (!frame) frame=requestAnimationFrame(()=>{frame=0;render();});
+        },{passive:true});
+        setItems(Array.from({length:16},(_,index)=>1001+index));
+        render();
+      },{target,moved,replace,withEntries,suppressTarget});
+      await page.evaluate(source);
+      const mark=page.getByRole('button',{name:'跳到 Post '+target,exact:true});
+      await mark.waitFor();
+      await page.evaluate(()=>window.fixtureRefreshJumpList());
+      await page.getByRole('button',{name:'跳到 Post 2001',exact:true}).waitFor();
+      const order=await page.locator('#xqc-reading-jumps button').evaluateAll(buttons=>buttons.map(button=>button.getAttribute('aria-label')));
+      assert.deepEqual(order.slice(0,5),[2001,2002,2003,2004,2005].map(id=>'跳到 Post '+id));
+      const oldFirst=order.indexOf('跳到 Post 1001');
+      const movedIndex=order.indexOf('跳到 Post '+target);
+      assert.ok(oldFirst>=5 && movedIndex>=5);
+      assert.equal(movedIndex<oldFirst,moved && withEntries);
+      assert.equal(await page.locator('.xqc-jump-history-start').getAttribute('aria-label'),'跳到 Post 1001');
+      if (moved && withEntries) assert.equal(order[movedIndex-1],'跳到 Post 1013');
+      assert.equal(await page.locator('[data-id="1008"]').count(),0);
+      await mark.hover();
+      assert.equal(await page.locator('#xqc-jump-preview p').textContent(),'Post '+target);
+      await mark.click();
+      if (moved && !suppressTarget) {
+        await page.waitForFunction(()=>{
+          const target=document.querySelector('[data-id="1008"]');
+          return target && Math.abs(target.getBoundingClientRect().top-53)<1;
+        },null,{timeout:3000});
+        await mark.and(page.locator('[aria-current="true"]')).waitFor();
+      } else {
+        const fallback=page.getByRole('dialog',{name:'帖子定位'});
+        const original=fallback.getByRole('link',{name:'打开原帖'});
+        await original.waitFor();
+        assert.equal(await fallback.locator('p').textContent(),'Post '+target);
+        assert.equal(await page.evaluate(()=>scrollY),0);
+        const [opened]=await Promise.all([page.waitForEvent('popup'),original.click()]);
+        await opened.waitForURL('https://x.com/alice/status/'+target);
+      }
+    } finally {await page.context().close();}
+  }
+  console.log('PASS: refreshed rail follows current timeline order, retains historical previews and locates posts by ID.');
+}
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:path.join(dir,'chrome-testing-157.0.8103.38/chrome-win64/chrome.exe')});
   try {
@@ -549,7 +661,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       await jumpPreview.waitFor();
       assert.equal(await targetJump.getAttribute('aria-describedby'),'xqc-jump-preview');
       assert.equal(await jumpPreview.locator('strong').innerText(),'Alice');
-      assert.equal(await jumpPreview.locator('span').innerText(),'@alice');
+      assert.equal(await jumpPreview.getByText('@alice',{exact:true}).innerText(),'@alice');
       assert.equal(await jumpPreview.locator('p').innerText(),'首页帖子 8');
       assert.equal(await jumpPreview.locator('small').innerText(),'图片');
       assert.equal(await jumpPreview.locator('img').getAttribute('src'),'https://pbs.twimg.com/profile_images/8/alice.png');
@@ -1257,6 +1369,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await builtInTile.waitFor();
     assert.deepEqual(await tabs.allTextContents(),['系统内置','自定义']);
     assert.deepEqual(errors,[]);
+    if (startPath==='/home') await testRefreshedJumpRail(browser,source);
     console.log('PASS: two-tab GIF library, upload, preview, playback, persistence and deletion; switches, native sidebar search, reply previews, subscriptions, routing, composer and stalled timeline recovery. Real X DOM still requires live validation.');
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
