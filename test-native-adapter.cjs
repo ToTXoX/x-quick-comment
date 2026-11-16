@@ -7,8 +7,8 @@ const dir = process.env.XQC_TEST_ASSETS || path.join(process.env.TEMP, 'xqc-loca
 const bundle = process.env.XQC_TEST_BUNDLE === 'current' ? 'x-current' : 'x-live';
 const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
 async function testRefreshedJumpRail(browser,source) {
-  for (const {moved,replace,withEntries,suppressTarget} of [
-    {moved:true,replace:true,withEntries:true},
+  for (const {moved,replace,withEntries,suppressTarget,verifyBoundaries} of [
+    {moved:true,replace:true,withEntries:true,verifyBoundaries:true},
     {moved:true,replace:false,withEntries:true},
     {moved:false,replace:true,withEntries:true},
     {moved:false,replace:true,withEntries:false},
@@ -76,6 +76,11 @@ async function testRefreshedJumpRail(browser,source) {
           setItems(next);
           render();
         };
+        window.fixtureChangeJumpList=(ids,mode)=>{
+          const existing=items.map(item=>item.id);
+          setItems(mode==='prepend' ? [...ids,...existing] : mode==='append' ? [...existing,...ids] : ids);
+          render();
+        };
         window.addEventListener('scroll',()=>{
           if (!frame) frame=requestAnimationFrame(()=>{frame=0;render();});
         },{passive:true});
@@ -85,8 +90,16 @@ async function testRefreshedJumpRail(browser,source) {
       await page.evaluate(source);
       const mark=page.getByRole('button',{name:'跳到 Post '+target,exact:true});
       await mark.waitFor();
+      const boundaries=page.locator('#xqc-reading-jumps .xqc-jump-refresh-start');
+      assert.equal(await boundaries.count(),0);
       await page.evaluate(()=>window.fixtureRefreshJumpList());
-      await page.getByRole('button',{name:'跳到 Post 2001',exact:true}).waitFor();
+      const currentHead=page.getByRole('button',{name:'跳到 Post 2001',exact:true});
+      await currentHead.waitFor();
+      if (verifyBoundaries) {
+        const markColor=mark=>getComputedStyle(mark,'::after').backgroundColor;
+        assert.equal(await currentHead.evaluate(markColor),await boundaries.evaluate(markColor));
+        assert.equal(await currentHead.evaluate(markColor),'rgb(168, 85, 247)');
+      }
       const order=await page.locator('#xqc-reading-jumps button').evaluateAll(buttons=>buttons.map(button=>button.getAttribute('aria-label')));
       assert.deepEqual(order.slice(0,5),[2001,2002,2003,2004,2005].map(id=>'跳到 Post '+id));
       const oldFirst=order.indexOf('跳到 Post 1001');
@@ -94,6 +107,7 @@ async function testRefreshedJumpRail(browser,source) {
       assert.ok(oldFirst>=5 && movedIndex>=5);
       assert.equal(movedIndex<oldFirst,moved && withEntries);
       assert.equal(await page.locator('.xqc-jump-history-start').getAttribute('aria-label'),'跳到 Post 1001');
+      assert.equal(await boundaries.getAttribute('aria-label'),moved && withEntries ? '跳到 Post 1013' : '跳到 Post 1001');
       if (moved && withEntries) assert.equal(order[movedIndex-1],'跳到 Post 1013');
       assert.equal(await page.locator('[data-id="1008"]').count(),0);
       await mark.hover();
@@ -114,9 +128,60 @@ async function testRefreshedJumpRail(browser,source) {
         const [opened]=await Promise.all([page.waitForEvent('popup'),original.click()]);
         await opened.waitForURL('https://x.com/alice/status/'+target);
       }
+      if (verifyBoundaries) {
+        const hint=page.locator('#xqc-reading-jumps .xqc-jump-refresh-hint');
+        const highlight=page.locator('#xqc-reading-jumps .xqc-jump-refresh-highlight');
+        const tail=Array.from({length:18},(_,index)=>9001+index);
+        await page.evaluate(tail=>{
+          scrollTo(0,0);
+          window.fixtureChangeJumpList(tail,'append');
+        },tail);
+        await page.waitForFunction(()=>document.querySelector('#xqc-reading-jumps button[aria-current]')?.getAttribute('aria-label')==='跳到 Post 2001');
+        assert.equal(await boundaries.count(),1);
+
+        const nextBatch=[3001,3002,3003,3004,3005,3006];
+        await page.evaluate(ids=>window.fixtureChangeJumpList(ids,'prepend'),nextBatch);
+        const previousHead=boundaries.and(page.getByRole('button',{name:'跳到 Post 2001',exact:true}));
+        await previousHead.waitFor();
+        assert.equal(await hint.textContent(),'上次时间线位置');
+        assert.equal(await highlight.getAttribute('aria-label'),'跳到 Post 2001');
+        assert.deepEqual(await boundaries.evaluateAll(marks=>marks.map(mark=>mark.getAttribute('aria-label'))),['跳到 Post 2001','跳到 Post 1013']);
+        assert.equal(await page.locator('[data-id="2001"]').count(),0);
+        await page.setViewportSize({width:1400,height:360});
+        await page.waitForFunction(()=>document.querySelectorAll('#xqc-reading-jumps button').length===10);
+        assert.equal(await boundaries.count(),2);
+        const markBox=await previousHead.boundingBox();
+        const hintBox=await hint.boundingBox();
+        assert.ok(Math.abs(markBox.y+markBox.height/2-hintBox.y-hintBox.height/2)<1);
+        assert.equal(await page.evaluate(()=>scrollY),0);
+        await previousHead.hover();
+        const preview=page.locator('#xqc-jump-preview');
+        assert.match(await preview.locator('.xqc-jump-refresh-caption').textContent(),/^刷新分隔 · \d{2}:\d{2}$/);
+        assert.equal(await preview.locator('p').textContent(),'Post 2001');
+        await previousHead.click();
+        await page.waitForFunction(()=>{
+          const row=document.querySelector('[data-id="2001"]');
+          return row && Math.abs(row.getBoundingClientRect().top-53)<1;
+        });
+        await previousHead.and(page.locator('[aria-current="true"]')).waitFor();
+        await page.getByText('上次时间线位置',{exact:true}).waitFor({state:'hidden',timeout:4000});
+        assert.equal(await highlight.count(),0);
+        assert.equal(await boundaries.count(),2);
+
+        await page.evaluate(tail=>{
+          scrollTo(0,0);
+          window.fixtureChangeJumpList([4001,4002,4003,4004,4005,4006,...tail],'replace');
+        },tail);
+        const unloadedBoundary=boundaries.and(page.getByRole('button',{name:'跳到刷新前的帖子',exact:true}));
+        await unloadedBoundary.waitFor();
+        assert.equal(await page.locator('[data-id="9001"]').count(),0);
+        await unloadedBoundary.click();
+        const loadedBoundary=boundaries.and(page.getByRole('button',{name:'跳到 Post 9001',exact:true}));
+        await loadedBoundary.and(page.locator('[aria-current="true"]')).waitFor();
+      }
     } finally {await page.context().close();}
   }
-  console.log('PASS: refreshed rail follows current timeline order, retains historical previews and locates posts by ID.');
+  console.log('PASS: refreshed rail preserves boundary marks, briefly highlights the latest boundary, and locates posts by ID.');
 }
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:path.join(dir,'chrome-testing-157.0.8103.38/chrome-win64/chrome.exe')});
