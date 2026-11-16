@@ -53,7 +53,7 @@
   if (!supportedPage()) {
     alert('请打开 X 首页、通知页、用户主页或帖子页，再点击 Peekala 书签'); return;
   }
-  const version = '3.71';
+  const version = '3.72';
   const stickerPackVersion = 1;
   const peekalaMark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <path fill="#b8b6b3" d="M41 46c-4 2-7 3-11 2-2 0-3 2-1 4 3 3 8 4 12 2l4-3zm5 7c-1 3 0 5-2 7-1 2 1 3 3 2 4-1 6-5 7-9z"/>
@@ -128,7 +128,7 @@
   });
   buddy.addEventListener('pointerleave',()=>buddy.classList.remove('xqc-buddy-hovered'));
 
-  let stopSidebar;
+  let stopSidebar, stopReadingJumps;
   function applyLikeEffects() {
     if (likeEffectsEnabled) document.addEventListener('click',onLikeClick,true);
     else stopLikeEffects();
@@ -149,6 +149,9 @@
   }
   function exitPeekala() {
     stopSidebar?.();
+    stopReadingJumps?.();
+    pageObserver.disconnect();
+    layerObserver.disconnect();
     stopLikeEffects();
     stopStickerPack?.();
     closeStickerManager();
@@ -161,7 +164,9 @@
 
   const featureStyle=document.createElement('style');
   featureStyle.textContent=`
-    #xqc-native-panel{container-type:inline-size}
+    html:has(#xqc-native-panel:not([hidden]),#xqc-reading-jumps:not([hidden])) #layers{z-index:101!important}
+    #xqc-native-panel{box-sizing:border-box;container-type:inline-size}
+    #xqc-native-panel[hidden]{display:none!important}
     #xqc-native-panel>header{flex-wrap:wrap}
     #xqc-native-panel .xqc-actions{margin-left:auto;align-items:center}
     #xqc-feature-controls{display:flex;align-items:center;gap:10px;color-scheme:light dark;color:CanvasText;font:12px/1 system-ui}
@@ -865,8 +870,502 @@
     frame=requestAnimationFrame(update);
   }
 
+  const tweetSelector='[data-testid="tweet"]';
+  let sidebarHost, readingJumps, jumpPreview, trackedLayerParent;
+  const pageUpdates=new Set();
+  const pageObserver=new MutationObserver(records=>{
+    const owned=node=>node instanceof Element && node.closest(
+      '#xqc-native-panel,#xqc-reading-jumps,#xqc-jump-preview,#xqc-feature-controls,.xqc-reply-context,.xqc-like-effect');
+    const pageChanged=records.some(record=>!owned(record.target) &&
+      [...record.addedNodes,...record.removedNodes].some(node=>!owned(node)));
+    if (pageChanged) for (const update of pageUpdates) update(records);
+  });
+  const layerObserver=new MutationObserver(alignWithNativeLayers);
+  function alignWithNativeLayers() {
+    // Keep both features alongside #layers so native dialogs can stack above them.
+    const layerParent=document.getElementById('layers')?.parentElement;
+    const nativeParent=layerParent && !sidebarHost?.contains(layerParent) ? layerParent : null;
+    const parent=nativeParent || document.body;
+    const elements=[sidebarHost,readingJumps,jumpPreview].filter(Boolean);
+    for (let i=elements.length-1;i>=0;i--) {
+      const element=elements[i], next=elements[i+1] || null;
+      if (element.parentElement!==parent || (next && element.nextElementSibling!==next)) parent.insertBefore(element,next);
+    }
+    if (trackedLayerParent===nativeParent) return;
+    trackedLayerParent=nativeParent;
+    layerObserver.disconnect();
+    if (!nativeParent) layerObserver.observe(parent,{childList:true,subtree:true});
+    else for (let node=parent;node;node=node.parentElement) layerObserver.observe(node,{childList:true});
+  }
+  function pageElement(selector) {
+    return [...document.querySelectorAll(selector)].find(node =>
+      !sidebarHost?.contains(node) && node.getBoundingClientRect().width > 0);
+  }
+  const primaryColumnSelector='[data-testid="primaryColumn"]';
+  function mainColumn() {
+    // A comma selector picks document order, not selector priority. On legacy X,
+    // main contains BOTH primaryColumn and sidebarColumn.
+    return pageElement(primaryColumnSelector) || pageElement('main');
+  }
+  function fiberOf(node) {
+    const name = Object.keys(node).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactContainer$'));
+    return name && node[name];
+  }
+
+  function startReadingJumps() {
+    const homeJumpTimelines=new Map();
+    const homeJumpRowKeys=new WeakMap();
+    const jumpMarkHeight=18;
+    let disposed=false;
+    readingJumps=document.createElement('nav');
+    readingJumps.id='xqc-reading-jumps';
+    readingJumps.setAttribute('aria-label','帖子快速跳转');
+    readingJumps.hidden=true;
+    jumpPreview=document.createElement('div');
+    jumpPreview.id='xqc-jump-preview';
+    jumpPreview.setAttribute('role','tooltip');
+    jumpPreview.hidden=true;
+    jumpPreview.innerHTML='<div><img width="28" height="28" alt="" referrerpolicy="no-referrer" hidden><strong></strong><span></span></div><p></p><small></small>';
+    const jumpPreviewAvatar=jumpPreview.querySelector('img');
+    const jumpPreviewAuthor=jumpPreview.querySelector('strong');
+    const jumpPreviewHandle=jumpPreview.querySelector('span');
+    const jumpPreviewText=jumpPreview.querySelector('p');
+    const jumpPreviewMedia=jumpPreview.querySelector('small');
+    const firstJump=document.createElement('button');
+    firstJump.type='button';
+    const firstJumpLabel='跳到第一条帖子';
+    firstJump.onclick=()=>requestPostJump(jumpTimeline?.firstKey,true);
+    const jumpList=document.createElement('div');
+    jumpList.className='xqc-jump-list';
+    readingJumps.append(firstJump,jumpList);
+    const style=document.createElement('style');
+    style.textContent=`
+      #xqc-reading-jumps{position:fixed;top:50%;transform:translate(-100%,-50%);z-index:100;width:24px;display:grid}
+      #xqc-reading-jumps[hidden]{display:none}
+      #xqc-reading-jumps button{display:grid;place-items:center;box-sizing:border-box;width:100%;height:${jumpMarkHeight}px;padding:0;border:0;border-radius:4px;background:transparent;cursor:pointer}
+      #xqc-reading-jumps button::after{content:"";width:8px;height:2px;border-radius:2px;background:#7d8994}
+      #xqc-reading-jumps button:is(:hover,:focus-visible,[aria-current])::after{background:#1d9bf0}
+      #xqc-reading-jumps button[aria-current]::after{width:13px}
+      #xqc-reading-jumps button:focus-visible{outline:2px solid #1d9bf0;outline-offset:-2px}
+      #xqc-jump-preview{position:fixed;z-index:100;box-sizing:border-box;max-height:calc(100vh - 16px);overflow:hidden;padding:12px 14px;border:1px solid color-mix(in srgb,CanvasText 16%,transparent);border-radius:15px;background:light-dark(#fff,#1b232c);color:CanvasText;color-scheme:light dark;box-shadow:0 8px 24px #0002;font:14px/1.45 system-ui;overflow-wrap:anywhere}
+      #xqc-jump-preview[hidden],#xqc-jump-preview [hidden],#xqc-jump-preview :is(span,p,small):empty{display:none}
+      #xqc-jump-preview div{display:flex;align-items:center;gap:6px;min-width:0}
+      #xqc-jump-preview img{flex:none;width:28px;height:28px;border-radius:50%;object-fit:cover}
+      #xqc-jump-preview strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #xqc-jump-preview span{flex:none;font-size:12px;opacity:.65}
+      #xqc-jump-preview p{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;white-space:pre-line;margin:0}
+      #xqc-jump-preview div:not([hidden])+p:not(:empty){margin-top:5px}
+      #xqc-jump-preview small{display:block;margin-top:5px;font-size:12px;opacity:.7}
+      @media (forced-colors:active){
+        #xqc-reading-jumps button::after{background:ButtonText;forced-color-adjust:none}
+        #xqc-reading-jumps button[aria-current]::after{background:Highlight}
+      }
+    `;
+    document.head.append(style);
+    alignWithNativeLayers();
+    const homePage=()=>/^\/home\/?$/.test(location.pathname);
+    const jumpButtons=new Map();
+    const jumpResizeObserver=new ResizeObserver(scheduleReadingJumps);
+    let jumpFrame=0, jumpFeed, jumpTimeline, jumpCurrent, pendingJump, jumpRetryTimer, jumpContentChanged=true;
+    let jumpMounted=new Map();
+    let jumpOrder=[], jumpLimit=0, jumpReadingKey, jumpBrowseKey, jumpWheelDelta=0;
+    let jumpPreviewButton, jumpPreviewTimer;
+    jumpPreviewAvatar.onerror=()=>{
+      jumpPreviewAvatar.hidden=true;
+      jumpPreviewAuthor.parentElement.hidden=!jumpPreviewAuthor.textContent && !jumpPreviewHandle.textContent;
+      positionJumpPreview();
+    };
+    bindJumpPreview(firstJump,()=>jumpTimeline?.posts.get(jumpTimeline.firstKey)?.preview);
+    readingJumps.addEventListener('wheel',browseJumpMarks,{passive:false});
+    jumpPreview.onpointerenter=()=>clearTimeout(jumpPreviewTimer);
+    jumpPreview.onpointerleave=()=>{
+      if (!jumpPreviewButton?.matches(':focus-visible')) queueHideJumpPreview();
+    };
+    function onJumpPageUpdate() {
+      if (homePage()) jumpContentChanged=true;
+      scheduleReadingJumps();
+    }
+    function scheduleReadingJumps() {
+      if (disposed || jumpFrame || (!jumpFeed && !homePage())) return;
+      jumpFrame=requestAnimationFrame(()=>{jumpFrame=0;syncReadingJumps();});
+    }
+    function homeReadingTop(feed) {
+      const tabs=feed.querySelector('[data-testid="ScrollSnap-List"],[role="tablist"]');
+      for (let node=tabs; node && node!==feed; node=node.parentElement) {
+        const {position,top}=getComputedStyle(node);
+        if ((position==='sticky' || position==='fixed') && top!=='auto') {
+          const rect=node.getBoundingClientRect();
+          return Math.max(0,Math.min(rect.bottom,rect.height+parseFloat(top)));
+        }
+      }
+      return 0;
+    }
+    function jumpToPost(key) {
+      const row=jumpMounted.get(key);
+      if (!row || !jumpFeed?.contains(row) || jumpPostKey(row)!==key) return false;
+      const {top,width,height}=row.getBoundingClientRect();
+      if (!width || !height) return false;
+      window.scrollBy({top:top-homeReadingTop(jumpFeed),behavior:'instant'});
+      scheduleReadingJumps();
+      return true;
+    }
+    function scrollToPendingJump(top) {
+      pendingJump.top=Math.max(0,top);
+      pendingJump.attempts++;
+      window.scrollTo({top:pendingJump.top,behavior:'instant'});
+      scheduleReadingJumps();
+    }
+    function requestPostJump(key,first=false) {
+      if (!homePage() || !jumpTimeline || !jumpFeed) return;
+      hideJumpPreview();
+      pendingJump=undefined;
+      if (jumpToPost(key)) return;
+      const post=jumpTimeline.posts.get(key);
+      if (!post && !first) return;
+      // A virtualized post needs to be mounted by X before we can align it precisely.
+      pendingJump={key,first,deadline:performance.now()+2500,attempts:0};
+      scrollToPendingJump(first ? 0 : post.top-homeReadingTop(jumpFeed));
+    }
+    function cancelPendingJump(event) {
+      if (event.type!=='wheel' || !readingJumps.contains(event.target)) pendingJump=undefined;
+    }
+    function jumpPostPart(row,selector) {
+      return [...row.querySelectorAll(selector)].find(node=>
+        node.closest(tweetSelector)===row && !node.parentElement.closest('[data-testid="quoteTweet"]'));
+    }
+    function jumpPostKey(row) {
+      if (jumpPostPart(row,'[data-testid="promotedIndicator"]')) return;
+      let id=tweetId(row);
+      // X can render an unmarked "Ad" label in the header instead of the disclosure element.
+      for (let fiber=fiberOf(row);fiber && fiber.stateNode!==jumpFeed;fiber=fiber.return) {
+        const props=fiber.stateNode?.props || fiber.memoizedProps;
+        const promoted=props?.promotedContent || props?.entry?.content?.promotedMetadata;
+        if (promoted && String(promoted.disclosure_type).toLowerCase()!=='earned') return;
+        const candidate=props?.tweet?.id_str ?? props?.entry?.content?.id;
+        if (!id && /^\d+$/.test(candidate)) id=String(candidate);
+      }
+      if (id) return id;
+      if (!homeJumpRowKeys.has(row)) homeJumpRowKeys.set(row,Symbol());
+      return homeJumpRowKeys.get(row);
+    }
+    function jumpPostText(row) {
+      return jumpPostPart(row,'[data-testid="tweetText"]')?.textContent.trim() || '';
+    }
+    function readJumpPreview(row,text=jumpPostText(row)) {
+      const user=jumpPostPart(row,'[data-testid="User-Name"],[data-testid="UserName"]');
+      const profile=[...user?.querySelectorAll('a[href]') || []].find(link=>
+        link.origin===location.origin && /^\/[a-z\d_]{1,15}\/?$/i.test(link.pathname));
+      const screenName=profile?.pathname.split('/')[1];
+      const handle=screenName ? '@'+screenName : '';
+      const author=(profile?.textContent || user?.textContent || '').trim().slice(0,80);
+      const image=jumpPostPart(row,'[data-testid="Tweet-User-Avatar"] img:is([src],[srcset])') ||
+        jumpPostPart(row,screenName ? `[data-testid="UserAvatar-Container-${screenName}" i] img:is([src],[srcset])` : '[data-testid^="UserAvatar-Container-"] img:is([src],[srcset])') ||
+        jumpPostPart(row,'img[src*="/profile_images/"],img[src*="/default_profile_images/"]');
+      const src=image?.currentSrc || image?.src || '';
+      const avatar=/^(?:https:\/\/(?:[a-z0-9-]+\.)+twimg\.com\/|data:image\/png;base64,)/i.test(src) ? src : '';
+      const media=[
+        ['[data-testid="tweetPhoto"]','图片'],
+        ['[data-testid="videoPlayer"],[data-testid="videoComponent"]','视频'],
+        ['[data-testid="card.wrapper"]','链接卡片'],
+        ['[data-testid="quoteTweet"]','引用帖子']
+      ].filter(([selector])=>jumpPostPart(row,selector)).map(([,label])=>label).join(' · ');
+      return {author,handle:handle===author ? '' : handle,avatar,text:text.slice(0,480),media};
+    }
+    function setJumpLabel(button,text,fallback) {
+      const excerpt=text.replace(/\s+/g,' ').slice(0,72);
+      const label=excerpt ? `跳到 ${excerpt}` : fallback;
+      if (button.getAttribute('aria-label')!==label) button.setAttribute('aria-label',label);
+    }
+    function hideJumpPreview() {
+      clearTimeout(jumpPreviewTimer);
+      jumpPreviewButton?.removeAttribute('aria-describedby');
+      jumpPreviewButton=undefined;
+      jumpPreview.hidden=true;
+    }
+    function dismissJumpPreview(event) {
+      if (event.key==='Escape') {
+        hideJumpPreview();
+        pendingJump=undefined;
+      }
+      if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key) &&
+          !readingJumps.contains(event.target)) cancelPendingJump(event);
+    }
+    function queueHideJumpPreview(button=jumpPreviewButton) {
+      if (!button || button!==jumpPreviewButton) return;
+      clearTimeout(jumpPreviewTimer);
+      jumpPreviewTimer=setTimeout(()=>{
+        if (!button.matches(':hover,:focus-visible') && !jumpPreview.matches(':hover')) hideJumpPreview();
+      },150);
+    }
+    function positionJumpPreview() {
+      if (!jumpPreviewButton) return;
+      if (readingJumps.hidden || !readingJumps.contains(jumpPreviewButton)) return hideJumpPreview();
+      const {clientWidth,clientHeight}=document.documentElement;
+      const anchor=jumpPreviewButton.getBoundingClientRect();
+      const gap=8;
+      const availableRight=clientWidth-anchor.right-2*gap;
+      const availableLeft=anchor.left-2*gap;
+      const onRight=availableRight>=380 || availableRight>=availableLeft;
+      const width=Math.min(380,onRight ? availableRight : availableLeft);
+      if (width<140) return hideJumpPreview();
+      jumpPreview.style.width=`${width}px`;
+      jumpPreview.style.left=`${onRight ? anchor.right+gap : anchor.left-gap-width}px`;
+      const height=jumpPreview.offsetHeight;
+      const top=(anchor.top+anchor.bottom-height)/2;
+      jumpPreview.style.top=`${Math.max(gap,Math.min(top,clientHeight-height-gap))}px`;
+    }
+    function showJumpPreview(button,post) {
+      if (!homePage() || readingJumps.hidden || !post || !Object.values(post).some(Boolean)) return hideJumpPreview();
+      clearTimeout(jumpPreviewTimer);
+      if (jumpPreviewButton!==button) jumpPreviewButton?.removeAttribute('aria-describedby');
+      jumpPreviewButton=button;
+      const {author,handle,avatar,text,media}=post;
+      jumpPreviewAuthor.textContent=author;
+      jumpPreviewHandle.textContent=handle;
+      if (avatar && jumpPreviewAvatar.getAttribute('src')!==avatar) jumpPreviewAvatar.src=avatar;
+      jumpPreviewAvatar.hidden=!avatar || (jumpPreviewAvatar.complete && !jumpPreviewAvatar.naturalWidth);
+      jumpPreviewAuthor.parentElement.hidden=!author && !handle && jumpPreviewAvatar.hidden;
+      jumpPreviewText.textContent=text;
+      jumpPreviewMedia.textContent=media;
+      const rgb=getComputedStyle(document.body).backgroundColor.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
+      jumpPreview.style.colorScheme=rgb ? (Number(rgb[1])+Number(rgb[2])+Number(rgb[3])<384 ? 'dark' : 'light') : '';
+      jumpPreview.hidden=false;
+      button.setAttribute('aria-describedby',jumpPreview.id);
+      positionJumpPreview();
+    }
+    function bindJumpPreview(button,getPost) {
+      button.onpointerenter=event=>{
+        if (event.pointerType!=='touch') showJumpPreview(button,getPost());
+      };
+      button.onfocus=()=>{
+        if (button.matches(':focus-visible')) showJumpPreview(button,getPost());
+      };
+      button.onpointerleave=button.onblur=()=>queueHideJumpPreview(button);
+    }
+    function timelineForFeed(feed) {
+      const tab=feed.querySelector('[role="tablist"] [aria-selected="true"]');
+      const key=JSON.stringify([tab?.getAttribute('href'),tab?.getAttribute('aria-label') || tab?.textContent.trim()]);
+      if (!homeJumpTimelines.has(key)) homeJumpTimelines.set(key,{posts:new Map(),firstKey:undefined});
+      return homeJumpTimelines.get(key);
+    }
+    function rememberJumpPosts(rows) {
+      const {posts}=jumpTimeline;
+      const previousMounted=jumpMounted;
+      jumpMounted=new Map(rows.map(({key,row})=>[key,row]));
+      const scrollY=window.scrollY;
+      let changed=false;
+      const known=rows.filter(({key})=>posts.has(key));
+      if (known.length) {
+        const first=known[0],last=known.at(-1);
+        const before=posts.get(first.key).top,after=posts.get(last.key).top;
+        const beforeShift=scrollY+first.top-before,afterShift=scrollY+last.top-after;
+        if (Math.abs(beforeShift)>=1 || Math.abs(afterShift)>=1) {
+          // Keep cached positions useful when content above a mounted post changes height.
+          for (const [key,post] of posts) if (!jumpMounted.has(key)) {
+            post.top+=post.top<=(before+after)/2 ? beforeShift : afterShift;
+          }
+          changed=true;
+        }
+      }
+      for (const {key,row,top} of rows) {
+        const position=scrollY+top;
+        const post=posts.get(key);
+        if (!post) {
+          posts.set(key,{top:position,preview:readJumpPreview(row)});
+          changed=true;
+          continue;
+        }
+        if (jumpContentChanged || previousMounted.get(key)!==row) {
+          const text=jumpPostText(row).slice(0,480);
+          if (text!==post.preview.text) changed=true;
+          post.preview=readJumpPreview(row,text);
+        }
+        if (Math.abs(post.top-position)>=1) changed=true;
+        post.top=position;
+      }
+      jumpContentChanged=false;
+      return changed;
+    }
+    function jumpNeighborhoodSize() {
+      return Math.max(1,Math.min(5,jumpLimit-3));
+    }
+    function jumpMarkIndexes() {
+      const capacity=jumpLimit-1;
+      const count=jumpOrder.length;
+      if (count<=capacity) return jumpOrder.map((_,index)=>index);
+      const current=jumpOrder.findIndex(([key])=>key===jumpReadingKey);
+      const browse=jumpOrder.findIndex(([key])=>key===jumpBrowseKey);
+      const center=browse>=0 ? browse : Math.max(0,current);
+      const indexes=new Set([center]);
+      if (capacity>=2) indexes.add(count-1);
+      if (capacity>=3 && current>=0) indexes.add(current);
+      const near=jumpNeighborhoodSize();
+      const start=Math.max(0,Math.min(center-Math.floor(near/2),count-near));
+      for (let i=start;i<start+near && indexes.size<capacity;i++) indexes.add(i);
+      // Sample the remaining positions at equal intervals in timeline order.
+      const remaining=jumpOrder.map((_,index)=>index).filter(index=>!indexes.has(index));
+      const slots=capacity-indexes.size;
+      for (let i=0;i<slots;i++) indexes.add(remaining[Math.floor((i+.5)*remaining.length/slots)]);
+      return [...indexes].sort((a,b)=>a-b);
+    }
+    function browseJumpMarks(event) {
+      if (event.ctrlKey || !event.deltaY || jumpOrder.length<jumpLimit) return;
+      event.preventDefault();
+      const threshold=4*jumpMarkHeight;
+      jumpWheelDelta+=event.deltaY*(event.deltaMode===1 ? jumpMarkHeight : event.deltaMode===2 ? threshold : 1);
+      const steps=Math.trunc(jumpWheelDelta/threshold);
+      if (!steps) return;
+      jumpWheelDelta-=steps*threshold;
+      const from=Math.max(0,jumpOrder.findIndex(([key])=>key===(jumpBrowseKey ?? jumpReadingKey)));
+      const stride=Math.max(1,jumpNeighborhoodSize()-1);
+      const to=Math.max(0,Math.min(from+stride*steps,jumpOrder.length-1));
+      jumpBrowseKey=jumpOrder[to][0];
+      hideJumpPreview();
+      renderJumpMarks();
+      selectCurrentJump(jumpReadingKey);
+    }
+    function renderJumpMarks() {
+      const first=jumpTimeline.posts.get(jumpTimeline.firstKey);
+      setJumpLabel(firstJump,first?.preview.text || '',firstJumpLabel);
+      const indexes=jumpMarkIndexes();
+      const visible=new Set(indexes.map(index=>jumpOrder[index][0]));
+      for (const [key,button] of jumpButtons) if (!visible.has(key)) {
+        button.remove();
+        jumpButtons.delete(key);
+      }
+      for (const [slotIndex,postIndex] of indexes.entries()) {
+        const [key,post]=jumpOrder[postIndex];
+        let button=jumpButtons.get(key);
+        if (!button) {
+          button=document.createElement('button');
+          button.type='button';
+          button.onclick=()=>requestPostJump(key);
+          bindJumpPreview(button,()=>post.preview);
+          jumpButtons.set(key,button);
+        }
+        setJumpLabel(button,post.preview.text,`跳到已加载的第 ${postIndex+2} 条帖子`);
+        const slot=jumpList.children[slotIndex];
+        if (slot!==button) jumpList.insertBefore(button,slot || null);
+      }
+    }
+    function selectCurrentJump(key) {
+      const button=key===undefined ? undefined : key===jumpTimeline.firstKey ? firstJump : jumpButtons.get(key);
+      if (button===jumpCurrent) return;
+      jumpCurrent?.removeAttribute('aria-current');
+      jumpCurrent=button;
+      button?.setAttribute('aria-current','true');
+    }
+    function syncReadingJumps() {
+      const feed=homePage() ? mainColumn() : undefined;
+      const timeline=feed && timelineForFeed(feed);
+      const timelineChanged=timeline!==jumpTimeline;
+      if (timelineChanged) {
+        jumpTimeline=timeline;
+        pendingJump=undefined;
+        jumpCurrent?.removeAttribute('aria-current');
+        jumpCurrent=undefined;
+        jumpOrder=[];
+        jumpReadingKey=jumpBrowseKey=undefined;
+        jumpWheelDelta=0;
+        jumpButtons.clear();
+        jumpList.replaceChildren();
+        hideJumpPreview();
+      }
+      if (feed!==jumpFeed) {
+        jumpResizeObserver.disconnect();
+        if (feed) jumpResizeObserver.observe(feed);
+        jumpFeed=feed;
+      }
+      if (!timeline) {
+        readingJumps.hidden=true;
+        jumpMounted.clear();
+        return;
+      }
+      const left=feed.getBoundingClientRect().left;
+      const rows=[];
+      const seen=new Set();
+      for (const row of feed.querySelectorAll(tweetSelector)) {
+        if (row.parentElement.closest(`${tweetSelector},[data-testid="quoteTweet"],[data-testid="sidebarColumn"]`)) continue;
+        const {top,bottom,width,height}=row.getBoundingClientRect();
+        if (!width || !height) continue;
+        const key=jumpPostKey(row);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        rows.push({key,row,top,bottom});
+      }
+      rows.sort((a,b)=>a.top-b.top);
+      const postsChanged=rememberJumpPosts(rows);
+      if (pendingJump && performance.now()>=pendingJump.deadline) pendingJump=undefined;
+      const first=rows[0];
+      const atStart=first && window.scrollY<=1 && first.top<document.documentElement.clientHeight;
+      const previousFirst=timeline.firstKey;
+      if (atStart && (!pendingJump?.first || !pendingJump.key || pendingJump.key===first.key)) timeline.firstKey=first.key;
+      readingJumps.hidden=left<24 || (!timeline.posts.size && window.scrollY<=0);
+      readingJumps.style.left=`${left}px`;
+      const orderChanged=timelineChanged || postsChanged || previousFirst!==timeline.firstKey;
+      if (orderChanged) jumpOrder=[...timeline.posts].filter(([key])=>key!==timeline.firstKey).sort((a,b)=>a[1].top-b[1].top);
+      const readingTop=homeReadingTop(feed);
+      const current=(rows.find(row=>row.bottom>readingTop+1) || rows.at(-1))?.key;
+      const readingChanged=current!==jumpReadingKey;
+      if (readingChanged) {
+        jumpReadingKey=current;
+        jumpBrowseKey=undefined;
+        jumpWheelDelta=0;
+      }
+      const limit=Math.max(2,Math.min(24,Math.floor(window.innerHeight/(2*jumpMarkHeight))));
+      const limitChanged=limit!==jumpLimit;
+      jumpLimit=limit;
+      if (orderChanged || readingChanged || limitChanged) renderJumpMarks();
+      selectCurrentJump(current);
+      positionJumpPreview();
+      if (!pendingJump) return;
+      const key=pendingJump.key ?? timeline.firstKey;
+      if (key && jumpToPost(key)) {
+        pendingJump=undefined;
+        return;
+      }
+      const post=timeline.posts.get(key);
+      const target=Math.max(0,(post?.top ?? 0)-readingTop);
+      if (!pendingJump.first && pendingJump.attempts<3 && Math.abs(target-pendingJump.top)>=1) scrollToPendingJump(target);
+      if (!jumpRetryTimer) jumpRetryTimer=setTimeout(()=>{
+        jumpRetryTimer=undefined;
+        if (pendingJump) scheduleReadingJumps();
+      },100);
+    }
+    pageUpdates.add(onJumpPageUpdate);
+    window.addEventListener('popstate',onJumpPageUpdate);
+    window.navigation?.addEventListener('currententrychange',scheduleReadingJumps);
+    window.addEventListener('resize',scheduleReadingJumps);
+    document.addEventListener('scroll',scheduleReadingJumps,{capture:true,passive:true});
+    document.addEventListener('keydown',dismissJumpPreview);
+    document.addEventListener('wheel',cancelPendingJump,{capture:true,passive:true});
+    document.addEventListener('pointerdown',cancelPendingJump,true);
+    scheduleReadingJumps();
+    return ()=>{
+      disposed=true;
+      pageUpdates.delete(onJumpPageUpdate);
+      window.removeEventListener('popstate',onJumpPageUpdate);
+      window.navigation?.removeEventListener('currententrychange',scheduleReadingJumps);
+      window.removeEventListener('resize',scheduleReadingJumps);
+      document.removeEventListener('scroll',scheduleReadingJumps,true);
+      document.removeEventListener('keydown',dismissJumpPreview);
+      document.removeEventListener('wheel',cancelPendingJump,true);
+      document.removeEventListener('pointerdown',cancelPendingJump,true);
+      jumpResizeObserver.disconnect();
+      cancelAnimationFrame(jumpFrame);
+      clearTimeout(jumpRetryTimer);
+      hideJumpPreview();
+      jumpPreview.remove();
+      readingJumps.remove();
+      jumpPreviewAvatar.onerror=null;
+      readingJumps=jumpPreview=undefined;
+      style.remove();
+    };
+  }
+
   function startSidebar() {
     const host = document.createElement('section');
+    host.hidden=true;
     host.id = 'xqc-native-panel';
     host.setAttribute('aria-label','Peekala 冒冒 · 用户主页');
     host.dataset.version=version;
@@ -891,9 +1390,7 @@
         </div>
       </div><footer class="xqc-footer" aria-label="相关链接"><div class="xqc-footer-note"><span class="xqc-version">v${version}</span><span>· 动态书签自动获取更新</span></div><div class="xqc-footer-links"><a class="xqc-update" href="https://x.usdts.de/" target="_blank" rel="noopener noreferrer" aria-label="更新主页" title="更新主页"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M13 3h8v8M21 3l-10 10"/></svg></a><a class="xqc-repo" href="https://github.com/ToTXoX/x-quick-comment" target="_blank" rel="noopener noreferrer" aria-label="GitHub 仓库" title="GitHub 仓库"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3"/><path d="M15 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 19 4.77 5.07 5.07 0 0 0 18.91 1S17.73.65 15 2.48a13.38 13.38 0 0 0-7 0C5.27.65 4.09 1 4.09 1A5.07 5.07 0 0 0 4 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 8 18.13V22"/></svg></a><a href="https://x.com/yygqdkqk" target="_blank" rel="noopener noreferrer" aria-label="dk021 的 X 主页" title="dk021 的 X 主页"><span aria-hidden="true">𝕏</span></a></div></footer>`;
     const style = document.createElement('style');
-    // X portals live outside this panel; keep native menus/dialogs above it.
-    // Removing this style on cleanup restores the original layering.
-    style.textContent = `#layers{z-index:101!important}#xqc-native-panel{position:fixed;top:0;bottom:0;right:0;width:var(--xqc-width,380px);z-index:100;background:Canvas;color:CanvasText;border-left:1px solid color-mix(in srgb,CanvasText 12%,transparent);box-shadow:-12px 0 48px #00000007;scrollbar-width:thin;scrollbar-color:#88888866 transparent;overflow:auto;overscroll-behavior:contain;color-scheme:light dark;padding-bottom:48px}#xqc-native-panel>header{display:flex;justify-content:space-between;align-items:center;padding:24px 20px 12px;min-height:38px;gap:12px;position:sticky;top:0;background:Canvas;z-index:5;font:14px system-ui;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent)}#xqc-native-panel>p{margin:20px;padding:18px 20px;border:1px solid color-mix(in srgb,CanvasText 10%,transparent);border-radius:14px;background:color-mix(in srgb,CanvasText 3%,Canvas);white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 system-ui}#xqc-native-panel>p button{margin-top:10px;padding:4px 10px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;cursor:pointer}#xqc-native-panel>p a{color:inherit}#xqc-native-panel .xqc-brand{display:flex;align-items:center;gap:11px}#xqc-native-panel .xqc-mark{width:26px;height:26px;display:grid;place-items:center;color:CanvasText}#xqc-native-panel .xqc-brand strong{display:block;font-size:15px;white-space:nowrap}#xqc-native-panel .xqc-brand-zh{margin-left:3px;font-size:11px;font-weight:500;opacity:.62}#xqc-native-panel .xqc-mark svg{display:block;width:26px;height:26px}#xqc-native-panel .xqc-actions{display:flex;flex-shrink:0;gap:6px}#xqc-native-panel .xqc-caption{display:block;margin-top:3px;font-size:11px;letter-spacing:.3px;opacity:.55}#xqc-native-panel .xqc-actions button{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;padding:0;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:50%;background:transparent;color:inherit;font:23px/1 system-ui;cursor:pointer}#xqc-native-panel .xqc-actions button:hover{background:color-mix(in srgb,CanvasText 7%,Canvas)}#xqc-native-panel .xqc-actions button:focus-visible{outline:2px solid CanvasText;outline-offset:3px}#xqc-native-panel .xqc-footer{position:fixed;right:0;bottom:0;width:inherit;height:48px;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;border-top:1px solid color-mix(in srgb,CanvasText 10%,transparent);background:Canvas;color:CanvasText;font:10px system-ui}#xqc-native-panel .xqc-footer-note{display:flex;align-items:center;gap:3px;height:18px;white-space:nowrap;opacity:.72}#xqc-native-panel .xqc-footer-note .xqc-version{font-weight:600}#xqc-native-panel .xqc-footer-links{display:flex;align-items:center;justify-content:center;gap:10px;height:24px}#xqc-native-panel .xqc-footer a{display:grid;place-items:center;width:22px;height:22px;color:inherit;text-decoration:none;opacity:.65}#xqc-native-panel .xqc-footer-note a{display:inline;width:auto;height:auto;color:inherit;text-decoration:underline;opacity:1}#xqc-native-panel .xqc-footer a:hover{opacity:1}#xqc-native-panel .xqc-footer a:focus-visible{outline:2px solid CanvasText;outline-offset:1px}#xqc-native-panel .xqc-footer svg{width:14px;height:14px}#xqc-native-panel .xqc-footer a span{font:16px/1 system-ui}#xqc-native-panel [data-testid="like"].xqc-liked-from-store,#xqc-native-panel [data-testid="like"].xqc-liked-from-store svg{color:rgb(249,24,128)!important}#xqc-native-panel.xqc-stalled .xqc-root [role=progressbar]{display:none!important}#xqc-native-panel .xqc-root main{width:100%;max-width:100%;min-width:0}#xqc-native-panel .xqc-root aside,#xqc-native-panel [data-testid="sidebarColumn"]{display:none!important}#xqc-native-panel [data-testid="primaryColumn"]{width:100%!important;min-width:0!important;max-width:100%!important}#xqc-native-panel .xqc-root:has(>div){min-height:50px}`;
+    style.textContent = `#xqc-native-panel{position:fixed;top:0;bottom:0;right:0;width:var(--xqc-width,380px);z-index:100;background:Canvas;color:CanvasText;border-left:1px solid color-mix(in srgb,CanvasText 12%,transparent);box-shadow:-12px 0 48px #00000007;scrollbar-width:thin;scrollbar-color:#88888866 transparent;overflow:auto;overscroll-behavior:contain;color-scheme:light dark;padding-bottom:48px}#xqc-native-panel>header{display:flex;justify-content:space-between;align-items:center;padding:24px 20px 12px;min-height:38px;gap:12px;position:sticky;top:0;background:Canvas;z-index:5;font:14px system-ui;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent)}#xqc-native-panel>p{margin:20px;padding:18px 20px;border:1px solid color-mix(in srgb,CanvasText 10%,transparent);border-radius:14px;background:color-mix(in srgb,CanvasText 3%,Canvas);white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 system-ui}#xqc-native-panel>p button{margin-top:10px;padding:4px 10px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;cursor:pointer}#xqc-native-panel>p a{color:inherit}#xqc-native-panel .xqc-brand{display:flex;align-items:center;gap:11px}#xqc-native-panel .xqc-mark{width:26px;height:26px;display:grid;place-items:center;color:CanvasText}#xqc-native-panel .xqc-brand strong{display:block;font-size:15px;white-space:nowrap}#xqc-native-panel .xqc-brand-zh{margin-left:3px;font-size:11px;font-weight:500;opacity:.62}#xqc-native-panel .xqc-mark svg{display:block;width:26px;height:26px}#xqc-native-panel .xqc-actions{display:flex;flex-shrink:0;gap:6px}#xqc-native-panel .xqc-caption{display:block;margin-top:3px;font-size:11px;letter-spacing:.3px;opacity:.55}#xqc-native-panel .xqc-actions button{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;padding:0;border:1px solid color-mix(in srgb,CanvasText 12%,transparent);border-radius:50%;background:transparent;color:inherit;font:23px/1 system-ui;cursor:pointer}#xqc-native-panel .xqc-actions button:hover{background:color-mix(in srgb,CanvasText 7%,Canvas)}#xqc-native-panel .xqc-actions button:focus-visible{outline:2px solid CanvasText;outline-offset:3px}#xqc-native-panel .xqc-footer{position:fixed;right:0;bottom:0;width:inherit;height:48px;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;border-top:1px solid color-mix(in srgb,CanvasText 10%,transparent);background:Canvas;color:CanvasText;font:10px system-ui}#xqc-native-panel .xqc-footer-note{display:flex;align-items:center;gap:3px;height:18px;white-space:nowrap;opacity:.72}#xqc-native-panel .xqc-footer-note .xqc-version{font-weight:600}#xqc-native-panel .xqc-footer-links{display:flex;align-items:center;justify-content:center;gap:10px;height:24px}#xqc-native-panel .xqc-footer a{display:grid;place-items:center;width:22px;height:22px;color:inherit;text-decoration:none;opacity:.65}#xqc-native-panel .xqc-footer-note a{display:inline;width:auto;height:auto;color:inherit;text-decoration:underline;opacity:1}#xqc-native-panel .xqc-footer a:hover{opacity:1}#xqc-native-panel .xqc-footer a:focus-visible{outline:2px solid CanvasText;outline-offset:1px}#xqc-native-panel .xqc-footer svg{width:14px;height:14px}#xqc-native-panel .xqc-footer a span{font:16px/1 system-ui}#xqc-native-panel [data-testid="like"].xqc-liked-from-store,#xqc-native-panel [data-testid="like"].xqc-liked-from-store svg{color:rgb(249,24,128)!important}#xqc-native-panel.xqc-stalled .xqc-root [role=progressbar]{display:none!important}#xqc-native-panel .xqc-root main{width:100%;max-width:100%;min-width:0}#xqc-native-panel .xqc-root aside,#xqc-native-panel [data-testid="sidebarColumn"]{display:none!important}#xqc-native-panel [data-testid="primaryColumn"]{width:100%!important;min-width:0!important;max-width:100%!important}#xqc-native-panel .xqc-root:has(>div){min-height:50px}`;
     style.textContent += `
       #xqc-native-panel .xqc-profile-skeleton{display:none}
       #xqc-native-panel[data-loading]>.xqc-profile-stage{position:relative;min-height:260px}
@@ -939,29 +1436,8 @@
       @keyframes xqc-loader-sweep{from{background-position:100% 0}to{background-position:0 0}}
     `;
     host.querySelector('.xqc-actions').prepend(controls);
-    document.head.append(style); document.body.append(host);
-    // #layers itself can have z-index 101 while its ancestors remain in a
-    // z-index:0 stacking context. A body-level panel still covers that entire
-    // context. Put the panel beside #layers instead of competing with ancestors.
-    let trackedLayerParent;
-    function alignWithNativeLayers() {
-      const layers=document.getElementById('layers');
-      const parent=layers?.parentElement;
-      if(parent && parent!==host && !host.contains(parent)) {
-        if(host.parentElement!==parent) parent.append(host);
-        if(trackedLayerParent===parent) return;
-        trackedLayerParent=parent;
-        layerObserver.disconnect();
-        // Watch container replacement only, not every editor/timeline mutation.
-        for(let node=parent;node;node=node.parentElement) layerObserver.observe(node,{childList:true});
-      } else if(trackedLayerParent) {
-        trackedLayerParent=null;
-        layerObserver.disconnect();
-        layerObserver.observe(document.body,{childList:true,subtree:true});
-      }
-    }
-    const layerObserver=new MutationObserver(alignWithNativeLayers);
-    layerObserver.observe(document.body,{childList:true,subtree:true});
+    document.head.append(style);
+    sidebarHost=host;
     alignWithNativeLayers();
     const status = host.querySelector(':scope > [role=status]');
     const mount = host.querySelector('.xqc-root');
@@ -986,17 +1462,25 @@
     let loadedHandle, pendingHandle, failedHandle, baselineTweet, baselineText;
     let tweetStore, unlistenTweets, likeFrame = 0;
     let sidebarScope, restoreNavigationConfig;
-    let previewStore, unlistenPreviews, previewFrame=0;
+    let previewRoot, previewPath, previewStore, unlistenPreviews, previewFrame=0, previewDataChanged=false;
+    let needsPreviewRoot=false;
     let homeReply, homeReplyFrame=0;
     const isCompose=path=>/^\/(?:compose(?:\/|$)|intent\/(?:post|tweet)(?:\/|$))/.test(path);
-    const previewCards=new Map();
-    const previewObserver=new MutationObserver(records=>{
-      const owned=node=>node instanceof Element && (host.contains(node) || controls.contains(node) || node.closest('.xqc-reply-context,.xqc-like-effect'));
-      const changes=records.filter(record=>!owned(record.target) &&
-        (record.type!=='childList' || [...record.addedNodes,...record.removedNodes].some(node=>!owned(node))));
-      if(changes.length) onPageUpdate();
-      if(changes.some(record=>record.type==='childList')) scheduleSearchPosition();
-    });
+    const notificationPage=()=>/^\/notifications(?:\/|$)/.test(location.pathname);
+    const previewRows=new Map();
+    const dirtyPreviewRows=new Set();
+    function onSidebarPageUpdate(records) {
+      // Page mutations can signal navigation or a new column. Scan rows only in the notification observer.
+      if (notificationPage()) {
+        const mainReplaced=!previewRoot?.isConnected || host.contains(previewRoot);
+        const primaryAdded=!mainReplaced && previewRoot.matches('main') && records.some(record=>
+          Array.from(record.addedNodes).some(node=>node instanceof Element &&
+            (node.matches(primaryColumnSelector) || node.querySelector(primaryColumnSelector))));
+        if (mainReplaced || primaryAdded) needsPreviewRoot=true;
+      }
+      onPageUpdate();
+      scheduleSidebarPosition();
+    }
     style.textContent+=`
       .xqc-reply-context{display:block;box-sizing:border-box;max-width:100%;min-width:0;margin:3px 0 0;padding:0;border:0;background:none;color:inherit;opacity:.4;text-decoration:none;font:12px/18px system-ui;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     `;
@@ -1005,7 +1489,7 @@
       previewFrame=requestAnimationFrame(()=>{previewFrame=0;syncPreviews();});
     }
     function onPageUpdate() {
-      schedulePreviews();
+      if (location.pathname!==previewPath || needsPreviewRoot) schedulePreviews();
       if (!homeReply) return;
       if (!homeReply.opened && performance.now()>homeReply.deadline) {
         homeReply=undefined;
@@ -1037,84 +1521,155 @@
         });
       });
     }
-    function clearPreviews() {
-      for(const {card} of previewCards.values()) card.remove();
-      previewCards.clear();
+    function queuePreviewRows(node) {
+      if (!(node instanceof Element) || node.closest('.xqc-reply-context,#xqc-native-panel')) return;
+      if (node.matches(tweetSelector)) dirtyPreviewRows.add(node);
+      for (const article of node.querySelectorAll(tweetSelector)) dirtyPreviewRows.add(article);
     }
-    function syncPreviews() {
-      if(disposed) return;
-      // X keeps the notification timeline mounted behind its composer while
-      // changing the URL. Preserve its row heights until the modal closes so
-      // native scroll restoration uses the same layout it saved on entry.
-      if(isCompose(location.pathname) &&
-        [...previewCards.keys()].some(article=>article.isConnected)) return;
-      if(!/^\/notifications(?:\/|$)/.test(location.pathname)) {
-        clearPreviews();unlistenPreviews?.();unlistenPreviews=previewStore=undefined;return;
+    const notificationObserver=new MutationObserver(records=>{
+      for (const {target,type,addedNodes,removedNodes} of records) {
+        if (target.closest('.xqc-reply-context,#xqc-native-panel')) continue;
+        const article=target.closest(tweetSelector);
+        if (type==='attributes') {
+          if (article && target.matches('a') && target.querySelector('time')) dirtyPreviewRows.add(article);
+          continue;
+        }
+        for (const node of [...addedNodes,...removedNodes]) {
+          if (node instanceof Element && node.matches('.xqc-reply-context')) {
+            if (article && !node.parentElement) dirtyPreviewRows.add(article);
+            continue;
+          }
+          if (article) dirtyPreviewRows.add(article);
+          queuePreviewRows(node);
+        }
       }
-      const main=mainColumn();
-      let store;
-      for(let fiber=main && fiberOf(main);fiber;fiber=fiber.return) {
+      if (dirtyPreviewRows.size) schedulePreviews();
+    });
+    function clearPreviews() {
+      notificationObserver.disconnect();
+      unlistenPreviews?.();
+      previewRoot=previewStore=unlistenPreviews=undefined;
+      previewDataChanged=false;
+      for (const {card} of previewRows.values()) card?.remove();
+      previewRows.clear();
+      dirtyPreviewRows.clear();
+    }
+    function findPreviewStore() {
+      for (let fiber=fiberOf(previewRoot);fiber;fiber=fiber.return) {
         const value=fiber.memoizedProps?.value;
         const candidate=value?.store || value;
-        if(!store && typeof candidate?.getState==='function' && typeof candidate?.subscribe==='function') {
-          try {if(candidate.getState()?.entities?.tweets?.entities) store=candidate;} catch {}
-        }
-      }
-      if(store!==previewStore) {
-        unlistenPreviews?.();previewStore=store;
-        unlistenPreviews=store?.subscribe(schedulePreviews);
-      }
-      let state;
-      try {state=store?.getState();} catch {}
-      const tweets=state?.entities?.tweets?.entities;
-      const seen=new Set();
-      for(const article of main?.querySelectorAll('[data-testid="tweet"]') || []) {
-        if(host.contains(article)) continue;
-        const timestamp=[...article.querySelectorAll('a[href]')].find(link=>
-          !link.closest('.xqc-reply-context,[data-testid="quoteTweet"]') &&
-          link.closest('[data-testid="tweet"]')===article && link.querySelector('time') &&
-          new URL(link.href).origin===location.origin && /\/status\/\d+\/?$/.test(new URL(link.href).pathname));
-        const id=timestamp?.pathname.match(/\/status\/(\d+)\/?$/)?.[1];
-        const reply=id && tweets?.[id],parentId=reply?.in_reply_to_status_id_str;
-        if(typeof parentId!=='string' || !/^\d+$/.test(parentId) || parentId===id) continue;
-
-        const parent=tweets[parentId];
-        const available=parent && !parent.isDeleted && !parent.tombstoneInfo;
-        const label='原帖';
-        const text=available && (parent.note_tweet?.text || parent.full_text || parent.text);
-        const media=available && (parent.extended_entities?.media || parent.entities?.media) || [];
-        let summary=typeof text==='string'?text:'';
-        for(const item of media) if(item.url) summary=summary.replace(item.url,'');
-        summary=summary.replace(/\s+/g,' ').trim();
-        const photos=media.filter(item=>item.type==='photo').length;
-        const mediaLabel=[photos?'图片 '+photos+' 张':'',media.some(item=>item.type==='video')?'视频':'',media.some(item=>item.type==='animated_gif')?'GIF':''].filter(Boolean).join(' · ');
-        if(!summary && !mediaLabel) continue;
-        seen.add(article);
-        const excerpt=[summary.slice(0,600),mediaLabel].filter(Boolean).join(' · ');
-        const signature=JSON.stringify([id,parentId,excerpt]);
-        let record=previewCards.get(article);
-        if(!record) {
-          const card=document.createElement('div');card.className='xqc-reply-context';
-          record={card};previewCards.set(article,record);
-        }
-        if(record.signature!==signature) {
-          const labelNode=document.createElement('span');labelNode.className='xqc-reply-label';labelNode.textContent=label+'：';
-          const body=document.createElement('span');body.className='xqc-reply-text';body.textContent=excerpt;
-          record.card.replaceChildren(labelNode,body);
-          record.signature=signature;
-        }
-        if(!article.contains(record.card)) {
-          const textNode=[...article.querySelectorAll('[data-testid="tweetText"]')].find(node=>
-            node.closest('[data-testid="tweet"]')===article && !node.closest('[data-testid="quoteTweet"]'));
-          if(textNode && !textNode.closest('a')) textNode.after(record.card);
-          else article.append(record.card);
-        }
-      }
-      for(const [article,record] of previewCards) if(!seen.has(article)) {
-        record.card.remove();previewCards.delete(article);
+        if (typeof candidate?.getState!=='function' || typeof candidate?.subscribe!=='function') continue;
+        try { if (candidate.getState()?.entities?.tweets?.entities) return candidate; } catch {}
       }
     }
-    let loadSerial = 0;
+    function syncPreviews() {
+      if (disposed) return;
+      const path=location.pathname;
+      const pathChanged=path!==previewPath;
+      previewPath=path;
+      // Leave the rows in place while the native composer restores scroll.
+      if (isCompose(path) && previewRoot?.isConnected) return;
+      if (!notificationPage()) {
+        if (previewRoot) clearPreviews();
+        return;
+      }
+      if (pathChanged || needsPreviewRoot || !previewRoot?.isConnected) {
+        needsPreviewRoot=false;
+        const main=mainColumn();
+        if (main!==previewRoot) {
+          clearPreviews();
+          if (!main) return;
+          previewRoot=main;
+          notificationObserver.observe(main,{subtree:true,childList:true,attributes:true,attributeFilter:['href']});
+          queuePreviewRows(main);
+        }
+      }
+      if (!previewRoot) return;
+      if (!previewStore || pathChanged) {
+        const store=findPreviewStore();
+        if (store!==previewStore) {
+          unlistenPreviews?.();
+          previewStore=store;
+          previewDataChanged=true;
+          unlistenPreviews=store?.subscribe(()=>{
+            previewDataChanged=true;
+            schedulePreviews();
+          });
+        }
+      }
+      let tweets;
+      try { tweets=previewStore?.getState()?.entities?.tweets?.entities; } catch {}
+      for (const article of dirtyPreviewRows) {
+        if (!previewRoot.contains(article)) {
+          previewRows.get(article)?.card?.remove();
+          previewRows.delete(article);
+          continue;
+        }
+        const timestamp=[...article.querySelectorAll('a[href*="/status/"]')].find(link=>
+          !link.closest('[data-testid="quoteTweet"]') && link.closest(tweetSelector)===article &&
+          link.querySelector('time') && link.origin===location.origin && /\/status\/\d+\/?$/.test(link.pathname));
+        const record=previewRows.get(article) || {};
+        record.id=timestamp?.pathname.match(/\/status\/(\d+)\/?$/)?.[1];
+        previewRows.set(article,record);
+        updatePreviewRow(article,record,tweets,true);
+      }
+      if (previewDataChanged) {
+        // Redux reports store changes without tweet IDs. Compare cached rows without scanning their DOM.
+        for (const [article,record] of previewRows) {
+          if (!dirtyPreviewRows.has(article)) updatePreviewRow(article,record,tweets);
+        }
+      }
+      dirtyPreviewRows.clear();
+      previewDataChanged=false;
+    }
+    function updatePreviewRow(article,record,tweets,domChanged=false) {
+      const parentId=tweets?.[record.id]?.in_reply_to_status_id_str;
+      if (record.parentId!==parentId) {
+        record.parentId=parentId;
+        record.parentKey=typeof parentId==='string' && /^\d+$/.test(parentId) ? parentId : undefined;
+      }
+      const parent=record.parentKey && record.parentKey!==record.id ? tweets?.[record.parentKey] : undefined;
+      const available=parent && !parent.isDeleted && !parent.tombstoneInfo;
+      const text=available ? parent.note_tweet?.text || parent.full_text || parent.text : undefined;
+      const media=available ? parent.extended_entities?.media || parent.entities?.media : undefined;
+      if (record.text!==text || record.media!==media) {
+        record.text=text;
+        record.media=media;
+        let summary=typeof text==='string'?text:'';
+        let photos=0, video=false, gif=false;
+        for (const item of media || []) {
+          if (item.url) summary=summary.replace(item.url,'');
+          if (item.type==='photo') photos++;
+          if (item.type==='video') video=true;
+          if (item.type==='animated_gif') gif=true;
+        }
+        const excerpt=[summary.replace(/\s+/g,' ').trim().slice(0,600),
+          photos?'图片 '+photos+' 张':'',video?'视频':'',gif?'GIF':''].filter(Boolean).join(' · ');
+        if (!excerpt) {
+          record.card?.remove();
+          record.card=undefined;
+        } else if (record.excerpt!==excerpt || !record.card) {
+          if (!record.card) {
+            record.card=document.createElement('div');
+            record.card.className='xqc-reply-context';
+            const label=document.createElement('span');
+            label.className='xqc-reply-label'; label.textContent='原帖：';
+            const body=document.createElement('span');
+            body.className='xqc-reply-text';
+            record.card.append(label,body);
+          }
+          record.card.lastElementChild.textContent=excerpt;
+        }
+        record.excerpt=excerpt;
+      }
+      if (!record.card || (!domChanged && article.contains(record.card))) return;
+      const textNode=[...article.querySelectorAll('[data-testid="tweetText"]')].find(node=>
+        node.closest(tweetSelector)===article && !node.closest('[data-testid="quoteTweet"]'));
+      if (textNode && !textNode.closest('a')) {
+        if (textNode.nextElementSibling!==record.card) textNode.after(record.card);
+      } else if (record.card.parentElement!==article) article.append(record.card);
+    }
+    let loadSerial = 0, loadRetried=false;
     const firstRetryMs = 3000, finalWaitMs = 4000;
     const setLoading = loading => {
       host.toggleAttribute('data-loading',loading);
@@ -1168,17 +1723,18 @@
       native.textContent = '在 X 中打开';
       status.append(document.createElement('br'), retry, document.createTextNode(' · '), native);
     }
-    function watchPosts(handle, serial, retried) {
+    function watchPosts(handle, serial) {
       clearTimeout(timeout);
+      if (host.hidden) return;
       timeout=setTimeout(()=>{
-        if (disposed || nativeError || serial !== loadSerial) return;
+        if (disposed || host.hidden || nativeError || serial !== loadSerial) return;
         if (hasPosts()) { finishLoading(handle,serial); return; }
-        if (retried) showStalled(handle);
+        if (loadRetried) showStalled(handle);
         else void restart(handle);
-      },retried?finalWaitMs:firstRetryMs);
+      },loadRetried?finalWaitMs:firstRetryMs);
     }
     async function restart(handle) {
-      if (disposed || handle !== desiredHandle) return;
+      if (disposed || host.hidden || handle !== desiredHandle) return;
       nativeError = undefined;
       clearTimeout(timeout); observer?.disconnect(); unlistenTweets?.();
       for (const [tweet,stop] of likeEffects) if (mount.contains(tweet)) stop();
@@ -1200,49 +1756,44 @@
     }
     const clean = () => {
       disposed = true; clearTimeout(timeout);
-      previewObserver.disconnect();unlistenPreviews?.();
+      pageUpdates.delete(onSidebarPageUpdate);clearPreviews();
       if(previewFrame) cancelAnimationFrame(previewFrame);
-      window.removeEventListener('popstate',onPageUpdate);clearPreviews();
+      window.removeEventListener('popstate',onPageUpdate);
       cancelAnimationFrame(homeReplyFrame);
       document.removeEventListener('click', onClick, true);
       for (const [tweet,stop] of likeEffects) if (host.contains(tweet)) stop();
       document.removeEventListener('click', onPanelLink);
       window.removeEventListener('resize', position);
-      window.removeEventListener('scroll', scheduleSearchPosition, true);
+      window.removeEventListener('scroll', scheduleSidebarPosition, true);
       searchResizeObserver.disconnect();
-      if (searchFrame) cancelAnimationFrame(searchFrame);
-      layerObserver.disconnect(); observer?.disconnect(); unlistenTweets?.();
+      columnResizeObserver.disconnect();
+      columnStyleObserver.disconnect();
+      if (positionFrame) cancelAnimationFrame(positionFrame);
+      observer?.disconnect(); unlistenTweets?.();
       if (likeFrame) cancelAnimationFrame(likeFrame);
       root?.unmount(); memory?.destroy?.(); restoreNavigationConfig?.();
       closeStickerManager();
       stopHeaderPreview?.();
       playButton.onclick=null;
-      host.remove(); style.remove();
+      host.remove(); sidebarHost=undefined; style.remove();
     };
     host.querySelector('.xqc-sidebar-collapse').onclick = () => setSidebar(false);
     host.querySelector('[aria-label="重新加载侧栏"]').onclick = () => {
       if (desiredHandle) void restart(desiredHandle);
       else report('请先点击左侧头像。');
     };
-    function pageElement(selector) {
-      return [...document.querySelectorAll(selector)].find(node =>
-        !host.contains(node) && node.getBoundingClientRect().width > 0);
-    }
-    function mainColumn() {
-      // A comma selector picks document order, not selector priority. On legacy X,
-      // main contains BOTH primaryColumn and sidebarColumn.
-      return pageElement('[data-testid="primaryColumn"]') || pageElement('main');
-    }
     function sidebarColumn() {
       return pageElement('[data-testid="sidebarColumn"]') || pageElement('main aside');
     }
-    let searchFrame = 0, observedSearch, observedSuggestions;
-    const searchResizeObserver = new ResizeObserver(scheduleSearchPosition);
-    function scheduleSearchPosition() {
-      if (disposed || searchFrame) return;
-      searchFrame = requestAnimationFrame(() => {
-        searchFrame = 0;
-        positionBelowSearch();
+    let positionFrame = 0, observedSearch, observedSuggestions, observedColumn, observedLayout;
+    const searchResizeObserver = new ResizeObserver(scheduleSidebarPosition);
+    const columnResizeObserver = new ResizeObserver(scheduleSidebarPosition);
+    const columnStyleObserver = new MutationObserver(scheduleSidebarPosition);
+    function scheduleSidebarPosition() {
+      if (disposed || positionFrame) return;
+      positionFrame = requestAnimationFrame(() => {
+        positionFrame = 0;
+        position();
       });
     }
     function positionBelowSearch(sidebar = sidebarColumn()) {
@@ -1284,32 +1835,45 @@
       const outer = '-64px -64px, calc(100% + 64px) -64px, calc(100% + 64px) calc(100% + 64px), -64px calc(100% + 64px), -64px -64px';
       return `polygon(evenodd, ${outer}, ${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px, ${left}px ${top}px)`;
     }
-    let widthWarning = false;
     function position() {
-      const primary = pageElement('[data-testid="primaryColumn"]');
+      const primary = pageElement(primaryColumnSelector);
       const sidebar = sidebarColumn();
-      const edge = primary?.getBoundingClientRect().right ??
-        sidebar?.getBoundingClientRect().left ?? mainColumn()?.getBoundingClientRect().right;
-      const available = edge == null ? 0 : document.documentElement.clientWidth - edge;
+      const column = primary || sidebar || pageElement('main');
+      const layout = column?.parentElement;
+      if (column !== observedColumn || layout !== observedLayout) {
+        columnResizeObserver.disconnect();
+        columnStyleObserver.disconnect();
+        for (const node of [column,layout]) if (node) {
+          columnResizeObserver.observe(node);
+          columnStyleObserver.observe(node,{attributes:true,attributeFilter:['class','style','hidden']});
+        }
+        observedColumn = column;
+        observedLayout = layout;
+      }
+      const box = column?.getBoundingClientRect();
+      const edge = column === sidebar ? box?.left : box?.right;
+      const viewportWidth = Math.min(window.innerWidth, document.documentElement.clientWidth);
+      const available = edge > 0 ? Math.floor(viewportWidth - edge) : 0;
       if (available < 280) {
-        host.style.width = 'min(380px, 95vw)';
-        positionBelowSearch(sidebar);
-        widthWarning = true;
-        report('右侧空间不足。请缩小浏览器缩放比例，使主栏右侧至少留出 280px。');
+        if (!host.hidden) {
+          closeStickerManager();
+          stopHeaderPreview?.();
+          host.hidden = true;
+          clearTimeout(timeout);
+        }
         return false;
       }
-      host.style.width = `${available}px`;
+      const wasHidden = host.hidden;
+      const width = `${available}px`;
+      if (host.style.width !== width) host.style.width = width;
+      if (wasHidden) host.hidden = false;
       positionBelowSearch(sidebar);
-      if (widthWarning) { widthWarning = false; report('右侧空间已恢复。请点击用户头像。'); }
+      if (wasHidden && pendingHandle) watchPosts(pendingHandle,loadSerial);
       return true;
     }
     window.addEventListener('resize', position);
-    window.addEventListener('scroll', scheduleSearchPosition, {capture:true,passive:true});
+    window.addEventListener('scroll', scheduleSidebarPosition, {capture:true,passive:true});
     position();
-    function fiberOf(node) {
-      const name = Object.keys(node).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactContainer$'));
-      return name && node[name];
-    }
     function runtime() {
       const chunks = window.webpackChunk_twitter_responsive_web;
       if (!Array.isArray(chunks)) throw Error('没有找到 responsive-web 运行时。当前 X 页面可能切换了版本。');
@@ -1562,7 +2126,6 @@
 
     async function open(handle, retried = false) {
       if(nativeError){report(nativeError);return;}
-      if (!position()) return;
       if (!retried && pendingHandle===handle) return;
       if (!retried && desiredHandle===handle && (host.classList.contains('xqc-stalled') || failedHandle===handle)) {
         return restart(handle);
@@ -1579,8 +2142,9 @@
       host.classList.remove('xqc-stalled');
       desiredHandle = handle;
       const serial = ++loadSerial;
+      loadRetried = retried;
       report((retried?'正在重试 @':'正在加载 @')+handle+' 的原生主页…',true);
-      watchPosts(handle, serial, retried);
+      watchPosts(handle, serial);
       try {
         if (!ready) ready = initialize(handle);
         await ready; if (disposed || serial!==loadSerial) return;
@@ -1611,7 +2175,7 @@
       const avatar='[data-testid^="UserAvatar-Container"],[data-testid="Tweet-User-Avatar"],img[src*="/profile_images/"],img[src*="/default_profile"]';
       if (!target.closest(avatar) && !link.querySelector(avatar)) return;
       const url=new URL(link.href), handle=url.pathname.match(/^\/([a-z0-9_]{1,15})(?:\/photo)?\/?$/i)?.[1];
-      if (url.origin!==location.origin || !handle) return;
+      if (url.origin!==location.origin || !handle || !position()) return;
       event.preventDefault();event.stopImmediatePropagation(); void open(handle);
     }
     function onPanelLink(event) {
@@ -1627,10 +2191,10 @@
     }
     document.addEventListener('click', onPanelLink);
     document.addEventListener('click', onClick, true);
-    previewObserver.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['href']});
+    pageUpdates.add(onSidebarPageUpdate);
     window.addEventListener('popstate',onPageUpdate);
     schedulePreviews();
-    if (!widthWarning) report('点击左侧头像，查看用户主页。');
+    report('点击左侧头像，查看用户主页。');
     return clean;
   }
   document.head.append(featureStyle);
@@ -1639,6 +2203,8 @@
     if (stopSidebar) likeSwitch.focus({preventScroll:true});
     else buddyOpen.click();
   };
+  pageObserver.observe(document.body,{childList:true,subtree:true});
+  stopReadingJumps=startReadingJumps();
   applyLikeEffects();
   setSidebar(true);
   const loadStickers=readStickerLibrary().then(library=>{

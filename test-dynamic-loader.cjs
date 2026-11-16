@@ -37,8 +37,9 @@ const {chromium} = require(path.join(dir, 'node_modules/playwright-core'));
     const bookmarks = fs.readFileSync(path.join(__dirname,'x-quick-comment-bookmarks.html'),'utf8');
     assert.ok(bookmarks.includes(bookmarkUrl));
     assert.match(bookmarks, /ICON="[^"]+">点我冒冒<\/A>/);
-    const csp = "default-src 'self'; script-src 'self' 'nonce-fixture'; connect-src 'self'; frame-src 'self'; img-src 'self' data: blob:";
-    const xPage = `<meta property="csp-nonce" content="fixture"><button id="launch">Launch</button>
+    const csp = "default-src 'self'; script-src 'self' 'nonce-fixture'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self'; img-src 'self' data: blob:";
+    const xPage = `<!doctype html><meta property="csp-nonce" content="fixture"><button id="launch">Launch</button>
+      <main data-testid="primaryColumn" style="width:600px">Timeline</main>
       <script nonce="fixture">document.getElementById('launch').onclick=()=>{${loader}};</script>`;
     for (const scenario of ['remote','fallback','timeout','corrupt']) {
       const githubAvailable=scenario!=='fallback';

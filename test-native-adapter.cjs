@@ -428,6 +428,34 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await page.locator('#xqc-native-panel>header').evaluate(el=>el.scrollWidth>el.clientWidth),false);
     assert.equal(await page.locator('#xqc-native-panel .xqc-footer').evaluate(el=>Math.round(el.getBoundingClientRect().bottom)),900);
     assert.equal(await page.locator('#xqc-native-panel .xqc-footer').evaluate(el=>Math.abs(el.getBoundingClientRect().left-el.parentElement.getBoundingClientRect().left)<2),true);
+    const mainColumn=page.locator('#app [data-testid="primaryColumn"]');
+    await panel.locator('article').evaluate(el=>{window.fixtureProfileBeforeResize=el;});
+    await featureMenu.getByRole('button',{name:'换表情',exact:true}).click();
+    const openStickerManager=page.locator('#xqc-sticker-manager:popover-open');
+    await openStickerManager.waitFor();
+    await page.setViewportSize({width:1050,height:900});
+    await panel.waitFor({state:'hidden'});
+    await openStickerManager.waitFor({state:'hidden'});
+    const nativeAvatar=mainColumn.locator('[data-testid="UserAvatar-Container-alice"]').first();
+    await nativeAvatar.evaluate(el=>el.addEventListener('click',event=>{
+      window.fixtureResizeAvatarPrevented=event.defaultPrevented;
+      event.preventDefault();
+    },{once:true}));
+    await nativeAvatar.click();
+    assert.equal(await page.evaluate(()=>window.fixtureResizeAvatarPrevented),false);
+    await page.setViewportSize({width:1120,height:900});
+    await panel.waitFor();
+    assert.equal(await panel.locator('article').evaluate(el=>el===window.fixtureProfileBeforeResize),true);
+    assert.ok(await panel.evaluate(el=>el.getBoundingClientRect().left>=
+      document.querySelector('#app [data-testid="primaryColumn"]').getBoundingClientRect().right));
+    await mainColumn.evaluate(el=>el.style.width='900px');
+    await panel.waitFor({state:'hidden'});
+    await mainColumn.evaluate(el=>el.style.width='');
+    await panel.waitFor();
+    await mainColumn.evaluate(el=>el.style.marginLeft='80px');
+    await panel.waitFor({state:'hidden'});
+    await mainColumn.evaluate(el=>el.style.marginLeft='');
+    await panel.waitFor();
     await page.setViewportSize({width:1400,height:900});
     await page.locator('#xqc-native-panel article').evaluate(el=>{window.fixtureBeforeReload=el;});
     await page.getByRole('button',{name:'重新加载侧栏'}).click();
@@ -449,11 +477,194 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await page.locator('#native-modal #reply').count(),0);
     assert.equal(await page.evaluate(()=>notificationMounts),1);
     if (startPath==='/home') {
+      const jumpRail=page.getByRole('navigation',{name:'帖子快速跳转'});
+      const jumpPreview=page.locator('#xqc-jump-preview');
+      const firstJump=jumpRail.getByRole('button',{name:'跳到 这个方法很有用',exact:true});
+      const firstPostSelector='#app [data-notification-id="222"]';
+      const firstPost=page.locator(firstPostSelector);
+      const targetJump=jumpRail.getByRole('button',{name:'跳到 首页帖子 8',exact:true});
+      const firstAvatar='data:image/png;base64,'+fs.readFileSync(path.join(__dirname,'favicon.png')).toString('base64');
+      await page.route('https://pbs.twimg.com/profile_images/**',route=>route.fulfill({path:path.join(__dirname,'favicon.png')}));
+      const waitForPostAtReadingTop=selector=>page.waitForFunction(selector=>{
+        const row=document.querySelector(selector);
+        const header=document.querySelector('#fixture-home-tabs');
+        return row && Math.abs(row.getBoundingClientRect().top-header.getBoundingClientRect().bottom)<1;
+      },selector);
+      await page.evaluate(firstAvatar=>{
+        const feed=document.querySelector('#app [data-testid="primaryColumn"]');
+        feed.style.marginLeft='64px';
+        feed.insertAdjacentHTML('afterbegin',`<div id="fixture-home-tabs" style="position:sticky;top:0;height:53px"><div role="tablist">For you</div></div>
+          <div id="fixture-home-ads"><article data-testid="tweet" style="height:80px"><span data-testid="promotedIndicator">广告</span>
+          <div data-testid="tweetText">带推广标记的帖子</div></article><div id="fixture-react-ad"></div></div>`);
+        const R=fixtureRequire(174394),DOM=fixtureRequire(214659);
+        function FixtureAd(){return R.createElement('article',{'data-testid':'tweet',style:{height:80}},
+          R.createElement('div',{'data-testid':'tweetText'},'带推广属性的帖子'));}
+        window.fixtureHomeAdRoot=DOM.createRoot(document.querySelector('#fixture-react-ad'));
+        window.fixtureHomeAdRoot.render(R.createElement(FixtureAd,{promotedContent:{disclosure_type:'promoted'}}));
+        feed.querySelector('[data-notification-id="222"]').insertAdjacentHTML('afterbegin',
+          `<div id="fixture-first-avatar" data-testid="UserAvatar-Container-alice"><img width="28" height="28" src="${firstAvatar}"></div>`);
+        const later=document.createElement('div');
+        later.id='fixture-home-tweets';
+        later.innerHTML=Array.from({length:16},(_,i)=>`<article id="fixture-home-tweet-${i+1}" data-testid="tweet" style="height:180px">
+          <a href="/alice/status/${1001+i}"><time>刚刚</time></a>
+          <div data-testid="tweetText">首页帖子 ${i+1}</div></article>`).join('');
+        later.firstElementChild.insertAdjacentHTML('beforeend','<div data-testid="quoteTweet"><article data-testid="tweet"><div data-testid="tweetText">引用内容</div></article></div>');
+        later.firstElementChild.querySelector('[data-testid="tweetText"]').append('，聊聊广告');
+        later.querySelector('#fixture-home-tweet-8').insertAdjacentHTML('afterbegin',
+          '<div data-testid="Tweet-User-Avatar"><img width="28" height="28" src="https://pbs.twimg.com/profile_images/8/alice.png"></div><div data-testid="User-Name"><a href="/alice">Alice</a><a href="/alice">@alice</a></div><div data-testid="tweetPhoto"></div>');
+        feed.append(later);
+        window.scrollTo(0,0);
+      },firstAvatar);
+      await page.locator('#fixture-react-ad article').waitFor();
+      await targetJump.waitFor();
+      await page.setViewportSize({width:1100,height:900});
+      await panel.waitFor({state:'hidden'});
+      await targetJump.waitFor();
+      await page.setViewportSize({width:1400,height:900});
+      await panel.waitFor();
+      assert.equal(await jumpRail.getByRole('button').count(),20);
+      assert.equal(await jumpRail.getByRole('button').first().getAttribute('aria-label'),'跳到 这个方法很有用');
+      assert.equal(await jumpRail.getByRole('button',{name:/引用内容/}).count(),0);
+      assert.equal(await jumpRail.getByRole('button',{name:/带推广(?:标记|属性)的帖子/}).count(),0);
+      assert.equal(await jumpRail.getByRole('button',{name:/聊聊广告/}).count(),1);
+      assert.equal(await jumpRail.evaluate(el=>el.getBoundingClientRect().right),64);
+      assert.equal(await firstJump.getAttribute('aria-current'),'true');
+      await targetJump.hover();
+      await jumpPreview.waitFor();
+      assert.equal(await targetJump.getAttribute('aria-describedby'),'xqc-jump-preview');
+      assert.equal(await jumpPreview.locator('strong').innerText(),'Alice');
+      assert.equal(await jumpPreview.locator('span').innerText(),'@alice');
+      assert.equal(await jumpPreview.locator('p').innerText(),'首页帖子 8');
+      assert.equal(await jumpPreview.locator('small').innerText(),'图片');
+      assert.equal(await jumpPreview.locator('img').getAttribute('src'),'https://pbs.twimg.com/profile_images/8/alice.png');
+      await page.waitForFunction(()=>document.querySelector('#xqc-jump-preview img').naturalWidth>0);
+      const previewBox=await jumpPreview.boundingBox();
+      const jumpBox=await targetJump.boundingBox();
+      assert.ok(previewBox.x>jumpBox.x+jumpBox.width && previewBox.x+previewBox.width<1400);
+      await page.mouse.move(previewBox.x+20,previewBox.y+20);
+      await page.keyboard.press('Escape');
+      await jumpPreview.waitFor({state:'hidden'});
+      assert.equal(await targetJump.getAttribute('aria-describedby'),null);
+      await targetJump.focus();
+      await jumpPreview.waitFor();
+      await targetJump.click();
+      await waitForPostAtReadingTop('#fixture-home-tweet-8');
+      await jumpPreview.waitFor({state:'hidden'});
+      await targetJump.and(jumpRail.locator('[aria-current="true"]')).waitFor();
+      assert.equal(await firstJump.count(),1);
+      assert.equal(await jumpRail.getByRole('button').first().getAttribute('aria-label'),'跳到 这个方法很有用');
+      await firstJump.click();
+      await waitForPostAtReadingTop(firstPostSelector);
+      await firstJump.and(jumpRail.locator('[aria-current="true"]')).waitFor();
+      await targetJump.click();
+      await targetJump.and(jumpRail.locator('[aria-current="true"]')).waitFor();
+      // Simulate X unmounting the top post while its virtual list preserves scroll height.
+      await firstPost.evaluate(post=>{
+        const spacer=document.createElement('div');
+        spacer.style.height=`${post.getBoundingClientRect().height}px`;
+        post.replaceWith(spacer);
+        window.addEventListener('scroll',function restore(){
+          if (scrollY>0) return;
+          window.removeEventListener('scroll',restore);
+          requestAnimationFrame(()=>requestAnimationFrame(()=>spacer.replaceWith(post)));
+        },{passive:true});
+      });
+      assert.equal(await firstPost.count(),0);
+      await firstJump.hover();
+      await jumpPreview.waitFor();
+      assert.equal(await jumpPreview.locator('p').innerText(),'这个方法很有用');
+      assert.equal(await jumpPreview.locator('img').getAttribute('src'),firstAvatar);
+      await firstJump.click();
+      await waitForPostAtReadingTop(firstPostSelector);
+      await firstJump.and(jumpRail.locator('[aria-current="true"]')).waitFor();
+
+      await jumpRail.evaluate(el=>{window.fixtureRailBeforeCollapse=el;});
+      await closeSidebar.click();
+      await panel.waitFor({state:'detached'});
+      assert.equal(await buddy.isVisible(),true);
+      assert.equal(await jumpRail.evaluate(el=>el===window.fixtureRailBeforeCollapse),true);
+
+      // Keep an older post's mark and preview while X replaces its row with a spacer and loads another batch.
+      await page.evaluate(()=>{
+        const list=document.querySelector('#fixture-home-tweets');
+        const post=list.querySelector('#fixture-home-tweet-8');
+        const spacer=document.createElement('div');
+        spacer.style.height=`${post.getBoundingClientRect().height}px`;
+        post.replaceWith(spacer);
+        document.querySelector('#fixture-home-ads article').style.height='170px';
+        list.insertAdjacentHTML('beforeend',Array.from({length:20},(_,i)=>`<article data-testid="tweet" style="height:180px">
+          <a href="/alice/status/${1017+i}"><time>刚刚</time></a><div data-testid="tweetText">新加载帖子 ${i+1}</div></article>`).join(''));
+        const readingPost=list.querySelector('#fixture-home-tweet-12');
+        const header=document.querySelector('#fixture-home-tabs').getBoundingClientRect().bottom;
+        window.scrollBy(0,readingPost.getBoundingClientRect().top-header);
+        window.addEventListener('scroll',function restore(){
+          const header=document.querySelector('#fixture-home-tabs').getBoundingClientRect().bottom;
+          if (Math.abs(spacer.getBoundingClientRect().top-header)>2) return;
+          window.removeEventListener('scroll',restore);
+          requestAnimationFrame(()=>requestAnimationFrame(()=>spacer.replaceWith(post.cloneNode(true))));
+        },{passive:true});
+      });
+      const lastJump=jumpRail.getByRole('button',{name:'跳到 新加载帖子 20',exact:true});
+      await lastJump.waitFor();
+      assert.equal(await jumpRail.getByRole('button').count(),24);
+      assert.equal(await page.locator('#fixture-home-tweet-8').count(),0);
+      await page.setViewportSize({width:1400,height:540});
+      await page.waitForFunction(()=>document.querySelectorAll('#xqc-reading-jumps button').length===15);
+      await jumpRail.getByRole('button',{name:'跳到 首页帖子 12',exact:true}).and(jumpRail.locator('[aria-current="true"]')).waitFor();
+      assert.equal(await firstJump.isVisible(),true);
+      assert.equal(await lastJump.isVisible(),true);
+      assert.equal(await jumpRail.locator('[aria-current="true"]').count(),1);
+      assert.ok((await jumpRail.boundingBox()).height<=270);
+      const skippedJump=jumpRail.getByRole('button',{name:'跳到 首页帖子 7',exact:true});
+      assert.equal(await skippedJump.count(),0);
+
+      const scrollBeforeRail=await page.evaluate(()=>scrollY);
+      const labels=await jumpRail.getByRole('button').evaluateAll(buttons=>buttons.map(button=>button.getAttribute('aria-label')).join('\n'));
+      const {x,y,width,height}=await firstJump.boundingBox();
+      await page.mouse.move(x+width/2,y+height/2);
+      await page.mouse.wheel(0,-72);
+      await page.waitForFunction(previous=>[...document.querySelectorAll('#xqc-reading-jumps button')]
+        .map(button=>button.getAttribute('aria-label')).join('\n')!==previous,labels);
+      await skippedJump.waitFor();
+      assert.equal(await page.evaluate(()=>scrollY),scrollBeforeRail);
+      assert.equal(await jumpRail.getByRole('button').count(),15);
+      await targetJump.hover();
+      await jumpPreview.waitFor();
+      assert.equal(await jumpPreview.locator('p').innerText(),'首页帖子 8');
+      assert.equal(await jumpPreview.locator('img').getAttribute('src'),'https://pbs.twimg.com/profile_images/8/alice.png');
+      await targetJump.click();
+      await waitForPostAtReadingTop('#fixture-home-tweet-8');
+      await targetJump.and(jumpRail.locator('[aria-current="true"]')).waitFor();
+      assert.equal(await jumpRail.getByRole('button').count(),15);
+      await buddy.click();
+      await panel.waitFor();
+      assert.equal(await jumpRail.evaluate(el=>el===window.fixtureRailBeforeCollapse),true);
+      await page.setViewportSize({width:1400,height:900});
+      await page.waitForFunction(()=>document.querySelectorAll('#xqc-reading-jumps button').length===24);
+      await firstJump.click();
+      await waitForPostAtReadingTop(firstPostSelector);
+
+      await page.evaluate(()=>history.replaceState(history.state,'','/notifications'));
+      await jumpRail.waitFor({state:'hidden'});
+      await page.evaluate(()=>history.replaceState(history.state,'','/home'));
+      await firstJump.waitFor();
+      await page.evaluate(async()=>{
+        window.scrollTo(0,0);
+        window.fixtureHomeAdRoot.unmount();
+        document.querySelector('#fixture-home-ads').remove();
+        document.querySelector('#fixture-first-avatar').remove();
+        document.querySelector('#fixture-home-tweets').remove();
+        document.querySelector('#fixture-home-tabs').remove();
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      });
+      await lastJump.waitFor();
+
       // Simulate native modal navigation and an imprecise scroll restoration.
       await page.evaluate(()=>{
+        // The simulated scroll restoration below is independent of Chromium's scroll anchoring.
+        document.documentElement.style.overflowAnchor='none';
         document.body.style.minHeight='1600px';
         document.querySelector('#app main').style.paddingTop='250px';
-        window.scrollTo(0,180);
         const reply=document.querySelector('[data-notification-id="222"] [data-testid="reply"]');
         reply.addEventListener('click',()=>{
           history.pushState({},'', '/compose/post');
@@ -473,18 +684,28 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
         },{once:true});
       });
       const post=page.locator('[data-notification-id="222"]');
-      const before=(await post.boundingBox()).y;
-      await post.locator('[data-testid="reply"]').click();
+      const before=await post.evaluate(article=>{
+        window.scrollTo(0,180);
+        const top=article.getBoundingClientRect().top;
+        article.querySelector('[data-testid="reply"]').click();
+        return top;
+      });
       await page.waitForURL('**/compose/post');
+      await jumpRail.waitFor({state:'hidden'});
       await page.locator('#fixture-home-send').click();
       await page.waitForURL('**/home');
+      await jumpRail.waitFor();
       await page.waitForFunction(top=>window.fixtureHomeReplySent &&
         Math.abs(document.querySelector('[data-notification-id="222"]').getBoundingClientRect().top-top)<1,before,{timeout:3000});
       await page.evaluate(()=>{
+        document.documentElement.style.overflowAnchor='';
         document.body.style.minHeight='';
         document.querySelector('#app main').style.paddingTop='';
+        document.querySelector('#app [data-testid="primaryColumn"]').style.marginLeft='';
         window.scrollTo(0,0);
       });
+      await mainColumn.locator('[data-testid="UserAvatar-Container-bob"]').first().click();
+      await panel.getByRole('heading',{name:'bob shared-context'}).waitFor();
     }
     // Native reply buttons carry their target in history state, not just the URL.
     await page.locator('#reply-state').click();
@@ -547,6 +768,34 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       assert.equal(await firstCard.getAttribute('title'),null);
       assert.match(await firstCard.innerText(),/今天分享一个提高工作效率的方法/);
       assert.equal(await firstCard.getAttribute('href'),null);
+      // Unrelated DOM and Redux updates should not rescan notification links.
+      const scans=await page.evaluate(async()=>{
+        const main=document.querySelector('#app [data-testid="primaryColumn"]');
+        const original=Element.prototype.querySelectorAll;
+        const rows=[];
+        Element.prototype.querySelectorAll=function(selector) {
+          if (selector.startsWith('a[href') && this.matches('[data-notification-id]')) {
+            rows.push(this.dataset.notificationId);
+          }
+          return original.call(this,selector);
+        };
+        const settle=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        const unrelated=document.createElement('div');
+        try {
+          document.body.append(unrelated);
+          unrelated.append('Unrelated DOM update');
+          fixtureTweetStore.dispatch({revision:fixtureTweetStore.getState().timelineRevision});
+          await settle();
+          const unrelatedScans=rows.splice(0);
+          main.querySelector('[data-notification-id="222"] [data-testid="tweetText"]').append('!');
+          await settle();
+          return {unrelatedScans,changedRows:rows};
+        } finally {
+          Element.prototype.querySelectorAll=original;
+          unrelated.remove();
+        }
+      });
+      assert.deepEqual(scans,{unrelatedScans:[],changedRows:['222']});
       // Native composer overlays retain the timeline but change the browser
       // URL. Background store updates must not remove/recreate preview rows.
       const beforeModal=await firstCard.evaluate(card=>{
@@ -624,6 +873,11 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       assert.equal(await page.evaluate(()=>fixtureNativeNotificationClicks),2);
       assert.equal(await page.locator('#xqc-native-panel .xqc-root').innerText(),'');
       await page.evaluate(()=>fixtureMainHistory.goBack());
+      await page.locator('[data-notification-id="333"] .xqc-reply-context').waitFor();
+      const rowBeforeRemount=await page.locator('[data-notification-id="333"]').elementHandle();
+      await page.evaluate(()=>fixtureRemountNotifications());
+      await page.waitForFunction(el=>!el.isConnected,rowBeforeRemount);
+      await rowBeforeRemount.dispose();
       await page.locator('[data-notification-id="333"] .xqc-reply-context').waitFor();
       await closeSidebar.click();
       assert.equal(await page.locator('.xqc-reply-context').count(),0);
@@ -742,7 +996,8 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await page.evaluate(()=>localStorage.setItem('xqc-features',JSON.stringify({likeEffects:true,sidebar:false})));
     await page.reload();
     await launch();
-    assert.equal(await panel.isVisible(),true);
+    await panel.waitFor({state:'attached'});
+    assert.equal(await panel.isHidden(),true);
     assert.equal(await buddy.isVisible(),false);
     await page.evaluate(()=>{
       document.querySelector('#app').innerHTML=`
@@ -753,6 +1008,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
       const button=document.querySelector('#sticker-like');
       button.onclick=()=>button.dataset.testid=button.dataset.testid==='like'?'unlike':'like';
     });
+    await panel.waitFor();
     const manage=page.getByRole('button',{name:'换表情',exact:true});
     const manager=page.getByRole('region',{name:'点赞特效',exact:true});
     const builtInTile=manager.getByRole('button',{name:'冒冒探头，使用中'});
@@ -943,6 +1199,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     await likeEffect.waitFor({state:'detached'});
     assert.equal(await buddy.count(),0);
     assert.equal(await panel.count(),0);
+    assert.equal(await page.locator('#xqc-reading-jumps,#xqc-jump-preview').count(),0);
     assert.equal(await page.evaluate(()=>window.__xQuickComment),undefined);
     await page.locator('#sticker-like').click();
     await page.locator('#sticker-like').click();
@@ -950,6 +1207,7 @@ const {chromium} = require(path.join(dir,'node_modules/playwright-core'));
     assert.equal(await likeEffect.count(),0);
 
     await page.reload();
+    await page.locator('#app').evaluate(el=>{el.innerHTML='<main data-testid="primaryColumn"></main>';});
     await launch();
     assert.equal(await panel.isVisible(),true);
     await manage.click();
