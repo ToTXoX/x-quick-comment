@@ -503,6 +503,7 @@ async function testRefreshedJumpRail(browser,source) {
     },{source,catalog,pack});
     const featureMenu=page.getByRole('group',{name:'Peekala 功能开关'});
     const buddy=page.getByRole('button',{name:'展开 Peekala 侧栏'});
+    const buddyHint=page.locator('#xqc-sidebar-buddy').getByText('点我冒冒',{exact:true});
     const closeSidebar=page.getByRole('button',{name:'收起侧栏',exact:true});
     const exit=page.getByRole('button',{name:'退出 Peekala'});
     const effectsSwitch=featureMenu.getByRole('switch',{name:'点赞特效',exact:true});
@@ -1208,9 +1209,20 @@ async function testRefreshedJumpRail(browser,source) {
     assert.equal(await page.evaluate(()=>fixtureTweetStore.subscriberCount()),baselineSubscribers);
     const savedFeatures=JSON.parse(await page.evaluate(()=>localStorage.getItem('xqc-features')));
     assert.deepEqual(savedFeatures,{likeEffects:true});
+    assert.equal(await buddyHint.count(),0);
+    await launch();
+    await buddyHint.waitFor();
+    assert.equal(await panel.count(),0);
+    await page.clock.runFor(2300);
+    await buddyHint.waitFor({state:'hidden'});
     await page.evaluate(()=>localStorage.setItem('xqc-features',JSON.stringify({likeEffects:true,sidebar:false})));
     await page.reload();
     await launch();
+    await buddyHint.waitFor();
+    assert.equal(await panel.count(),0);
+    await buddy.click();
+    await buddyHint.waitFor({state:'hidden'});
+    assert.equal(await page.evaluate(()=>localStorage.getItem('xqc-sidebar-state')),'open');
     await panel.waitFor({state:'attached'});
     assert.equal(await panel.isHidden(),true);
     assert.equal(await buddy.isVisible(),false);
@@ -1424,6 +1436,9 @@ async function testRefreshedJumpRail(browser,source) {
     await page.reload();
     await page.locator('#app').evaluate(el=>{el.innerHTML='<main data-testid="primaryColumn"></main>';});
     await launch();
+    await buddyHint.waitFor();
+    assert.equal(await panel.count(),0);
+    await buddy.click();
     assert.equal(await panel.isVisible(),true);
     await manage.click();
     await manager.getByRole('button',{name:'我的小动画，使用中'}).waitFor();

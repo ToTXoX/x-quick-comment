@@ -76,11 +76,14 @@
 </svg>`;
   const likeEffects=new Map();
   const preferencesKey='xqc-features';
+  const sidebarStateKey='xqc-sidebar-state';
   let likeEffectsEnabled=true;
+  let sidebarStartsOpen=true;
   try {
     const saved=JSON.parse(localStorage.getItem(preferencesKey));
     if (typeof saved?.likeEffects==='boolean') likeEffectsEnabled=saved.likeEffects;
   } catch {}
+  try { sidebarStartsOpen=localStorage.getItem(sidebarStateKey)!=='collapsed'; } catch {}
 
   const controls=document.createElement('div');
   controls.id='xqc-feature-controls';
@@ -116,8 +119,10 @@
     <button type="button" class="xqc-buddy-exit" aria-label="退出 Peekala" title="退出 Peekala">
       <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m2.5 2.5 7 7m0-7-7 7"/></svg>
     </button>
+    <span class="xqc-buddy-hint" role="status"></span>
   `;
   const buddyOpen=buddy.querySelector('.xqc-buddy-open');
+  const buddyHint=buddy.querySelector('.xqc-buddy-hint');
   buddyOpen.onclick=()=>{
     setSidebar(true);
     likeSwitch.focus({preventScroll:true});
@@ -128,7 +133,16 @@
   });
   buddy.addEventListener('pointerleave',()=>buddy.classList.remove('xqc-buddy-hovered'));
 
-  let stopSidebar, stopReadingJumps;
+  let stopSidebar, stopReadingJumps, buddyHintTimer;
+  function showBuddyHint() {
+    clearTimeout(buddyHintTimer);
+    if (!buddyHint.textContent) buddyHint.textContent='点我冒冒';
+    buddyHintTimer=setTimeout(hideBuddyHint,2200);
+  }
+  function hideBuddyHint() {
+    clearTimeout(buddyHintTimer);
+    if (buddyHint.textContent) buddyHint.textContent='';
+  }
   function applyLikeEffects() {
     if (likeEffectsEnabled) document.addEventListener('click',onLikeClick,true);
     else stopLikeEffects();
@@ -137,17 +151,24 @@
     document.removeEventListener('click',onLikeClick,true);
     for (const stop of likeEffects.values()) stop();
   }
-  function setSidebar(open) {
+  function rememberSidebar(open) {
+    try { localStorage.setItem(sidebarStateKey,open ? 'open' : 'collapsed'); } catch {}
+  }
+  function setSidebar(open,{remember=true}={}) {
+    hideBuddyHint();
+    if (remember) rememberSidebar(open);
     if (open) buddy.classList.remove('xqc-buddy-hovered');
     buddy.hidden=open;
     if (open) stopSidebar ??= startSidebar();
     else {
       stopSidebar?.();
       stopSidebar=undefined;
-      buddyOpen.focus({preventScroll:true});
+      if (remember) buddyOpen.focus({preventScroll:true});
     }
   }
   function exitPeekala() {
+    rememberSidebar(false);
+    hideBuddyHint();
     stopSidebar?.();
     stopReadingJumps?.();
     pageObserver.disconnect();
@@ -189,6 +210,8 @@
     #xqc-sidebar-buddy .xqc-buddy-exit:focus-visible,#xqc-sidebar-buddy.xqc-buddy-hovered .xqc-buddy-exit{opacity:1;pointer-events:auto}
     #xqc-sidebar-buddy .xqc-buddy-exit:focus-visible{outline-color:Canvas}
     #xqc-sidebar-buddy button:focus-visible{outline:2px solid CanvasText;outline-offset:-2px}
+    #xqc-sidebar-buddy .xqc-buddy-hint{position:absolute;right:calc(100% + 6px);top:50%;transform:translateY(-50%);padding:5px 9px;border:1px solid color-mix(in srgb,CanvasText 18%,Canvas);border-radius:9px;background:Canvas;color:CanvasText;box-shadow:0 2px 8px #0002;font:12px/1.4 system-ui;white-space:nowrap;pointer-events:none}
+    #xqc-sidebar-buddy .xqc-buddy-hint:empty{opacity:0}
     @container (max-width:340px){
       #xqc-native-panel>header:has(.xqc-actions){padding-inline:10px}
       #xqc-native-panel .xqc-actions>#xqc-feature-controls{margin-right:0}
@@ -2501,12 +2524,13 @@
   document.body.append(buddy,stickerManager);
   window[key]=()=>{
     if (stopSidebar) likeSwitch.focus({preventScroll:true});
-    else buddyOpen.click();
+    else showBuddyHint();
   };
   pageObserver.observe(document.body,{childList:true,subtree:true});
   stopReadingJumps=startReadingJumps();
   applyLikeEffects();
-  setSidebar(true);
+  setSidebar(sidebarStartsOpen,{remember:false});
+  if (!sidebarStartsOpen) showBuddyHint();
   const loadStickers=readStickerLibrary().then(library=>{
     stickers=library;
     const selected=library.items.find(item=>item.id===library.selected);
