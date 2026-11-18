@@ -53,7 +53,7 @@
   if (!supportedPage()) {
     alert('请打开 X 首页、通知页、用户主页或帖子页，再点击 Peekala 书签'); return;
   }
-  const version = '3.75';
+  const version = '3.76';
   const stickerPackVersion = 1;
   const peekalaMark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <path fill="#b8b6b3" d="M41 46c-4 2-7 3-11 2-2 0-3 2-1 4 3 3 8 4 12 2l4-3zm5 7c-1 3 0 5-2 7-1 2 1 3 3 2 4-1 6-5 7-9z"/>
@@ -133,7 +133,7 @@
   });
   buddy.addEventListener('pointerleave',()=>buddy.classList.remove('xqc-buddy-hovered'));
 
-  let stopSidebar, stopReadingJumps, buddyHintTimer;
+  let stopSidebar, stopReadingJumps, stopNotificationEffects, buddyHintTimer;
   function showBuddyHint() {
     clearTimeout(buddyHintTimer);
     if (!buddyHint.textContent) buddyHint.textContent='点我冒冒';
@@ -144,11 +144,15 @@
     if (buddyHint.textContent) buddyHint.textContent='';
   }
   function applyLikeEffects() {
-    if (likeEffectsEnabled) document.addEventListener('click',onLikeClick,true);
-    else stopLikeEffects();
+    if (likeEffectsEnabled) {
+      document.addEventListener('click',onLikeClick,true);
+      stopNotificationEffects ??= startNotificationEffects();
+    } else stopLikeEffects();
   }
   function stopLikeEffects() {
     document.removeEventListener('click',onLikeClick,true);
+    stopNotificationEffects?.();
+    stopNotificationEffects=undefined;
     for (const stop of likeEffects.values()) stop();
   }
   function rememberSidebar(open) {
@@ -893,6 +897,86 @@
     }
     likeEffects.set(tweet,stop);
     frame=requestAnimationFrame(update);
+  }
+
+  function startNotificationEffects() {
+    let link, badge, unread, frame, stopPlayback;
+    const observer=new MutationObserver(schedule);
+
+    function schedule() {
+      frame ??= requestAnimationFrame(sync);
+    }
+    function onPageUpdate() {
+      if (!link?.isConnected) schedule();
+    }
+    function sync() {
+      frame=undefined;
+      if (!link?.isConnected) {
+        observer.disconnect();
+        link=document.querySelector('[data-testid="AppTabBar_Notifications_Link"]') ||
+          document.querySelector('header[role="banner"] a[href="/notifications"]');
+        if (!link) return;
+        observer.observe(link,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['aria-label']});
+      }
+
+      badge=undefined;
+      const walker=document.createTreeWalker(link,NodeFilter.SHOW_TEXT);
+      let badgeCount=0;
+      for (let node=walker.nextNode();node;node=walker.nextNode()) {
+        const match=node.data.trim().match(/^(\d+)\+?$/);
+        if (!match) continue;
+        badge=node.parentElement;
+        badgeCount=Number(match[1]);
+        break;
+      }
+      // X's accessible label can expose the exact count after the badge reaches its display cap.
+      const labelCount=link.getAttribute('aria-label')?.match(/\d+(?:[, .\u00a0\u202f]\d{3})*/)?.[0];
+      const count=labelCount ? Number(labelCount.replace(/\D/g,'')) : badgeCount;
+      const previous=unread;
+      unread=count;
+      if (count<previous) stopPlayback?.();
+      if (previous===undefined || count<=previous || reducedMotion.matches) return;
+      const target=link;
+      void loadStickers.then(()=>{
+        if (link===target && target.isConnected && unread===count && !reducedMotion.matches) play();
+      });
+    }
+    function play() {
+      const sticker=currentSticker();
+      if (!sticker.gif) return;
+      stopPlayback?.();
+      const playback=createLikeEffect(sticker,stop);
+      let positionFrame;
+      const timeout=setTimeout(stop,sticker.duration);
+      function stop() {
+        cancelAnimationFrame(positionFrame);
+        clearTimeout(timeout);
+        playback.stop();
+        stopPlayback=undefined;
+      }
+      function position() {
+        if (!link?.isConnected || reducedMotion.matches) return stop();
+        const anchor=badge?.isConnected ? badge : link.querySelector('svg') || link;
+        const {x,y,width,height}=anchor.getBoundingClientRect();
+        if (!width || !height) return stop();
+        playback.element.style.left=`${x+width*(anchor===badge ? .5 : .85)}px`;
+        playback.element.style.top=`${y+height*(anchor===badge ? .5 : .15)}px`;
+        positionFrame=requestAnimationFrame(position);
+      }
+      stopPlayback=stop;
+      playback.element.classList.add('xqc-notification-effect');
+      (document.getElementById('layers')?.parentElement || document.body).append(playback.element);
+      position();
+    }
+    pageUpdates.add(onPageUpdate);
+    sync();
+    return ()=>{
+      pageUpdates.delete(onPageUpdate);
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      stopPlayback?.();
+      link=undefined;
+    };
   }
 
   const tweetSelector='[data-testid="tweet"]';

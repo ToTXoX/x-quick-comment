@@ -1379,7 +1379,44 @@ async function testRefreshedJumpRail(browser,source) {
     assert.equal(await manager.getByRole('button',{name:'上传 GIF',exact:true}).count(),0);
     await page.keyboard.press('Escape');
     await manager.waitFor({state:'hidden'});
+    const notificationLink=page.locator('[data-testid="AppTabBar_Notifications_Link"]');
+    const notificationBadge=notificationLink.locator('span');
+    const notificationEffect=page.locator('.xqc-notification-effect');
+    await page.evaluate(()=>document.body.insertAdjacentHTML('beforeend',
+      '<header role="banner" style="position:fixed;left:30px;top:25px"><a href="/notifications" data-testid="AppTabBar_Notifications_Link" aria-label="Notifications (2 unread notifications)"><span>2</span> 通知</a></header>'));
+    await page.clock.runFor(80);
+    assert.equal(await notificationEffect.count(),0);
+    await notificationLink.evaluate(link=>{
+      link.setAttribute('aria-label','Notifications (3 unread notifications)');
+      link.querySelector('span').textContent='3';
+    });
+    await notificationEffect.locator('img').waitFor();
+    await page.waitForFunction(()=>document.querySelector('.xqc-notification-effect img')?.naturalWidth===16);
+    const badgeBox=await notificationBadge.boundingBox();
+    const [effectX,effectY]=await notificationEffect.evaluate(effect=>[parseFloat(effect.style.left),parseFloat(effect.style.top)]);
+    assert.ok(Math.abs(effectX-(badgeBox.x+badgeBox.width/2))<1);
+    assert.ok(Math.abs(effectY-(badgeBox.y+badgeBox.height/2))<1);
+    assert.equal(await notificationBadge.textContent(),'3');
+    await closeSidebar.click();
+    await page.clock.runFor(1100);
+    await notificationEffect.waitFor({state:'detached'});
+    await notificationLink.evaluate(link=>{
+      const replacement=link.cloneNode(true);
+      replacement.removeAttribute('aria-label');
+      link.replaceWith(replacement);
+    });
+    await page.clock.runFor(80);
+    assert.equal(await notificationEffect.count(),0);
+    await notificationBadge.evaluate(badge=>{badge.firstChild.data='4';});
+    await notificationEffect.locator('img').waitFor();
+    assert.equal(await buddy.isVisible(),true);
+    await notificationBadge.evaluate(badge=>{badge.firstChild.data='1';});
+    await notificationEffect.waitFor({state:'detached'});
+    await buddy.click();
     await effectsSwitch.uncheck();
+    await notificationBadge.evaluate(badge=>{badge.firstChild.data='2';});
+    await page.clock.runFor(80);
+    assert.equal(await notificationEffect.count(),0);
     const tweetLike=page.locator('#sticker-like');
     const likeState=await tweetLike.getAttribute('data-testid');
     await playEffect.click();
