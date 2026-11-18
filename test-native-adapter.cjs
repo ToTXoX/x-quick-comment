@@ -1398,7 +1398,7 @@ async function testRefreshedJumpRail(browser,source) {
     assert.ok(Math.abs(effectY-(badgeBox.y+badgeBox.height/2))<1);
     assert.equal(await notificationBadge.textContent(),'3');
     await closeSidebar.click();
-    await page.clock.runFor(1100);
+    await page.clock.runFor(1200);
     await notificationEffect.waitFor({state:'detached'});
     await notificationLink.evaluate(link=>{
       const replacement=link.cloneNode(true);
@@ -1410,10 +1410,30 @@ async function testRefreshedJumpRail(browser,source) {
     await notificationBadge.evaluate(badge=>{badge.firstChild.data='4';});
     await notificationEffect.locator('img').waitFor();
     assert.equal(await buddy.isVisible(),true);
-    await notificationBadge.evaluate(badge=>{badge.firstChild.data='1';});
-    await notificationEffect.waitFor({state:'detached'});
+    const playingImage=notificationEffect.locator('img');
+    const firstNotificationSource=await playingImage.getAttribute('src');
+    await notificationBadge.evaluate(badge=>{badge.firstChild.data='';});
+    await page.clock.runFor(150);
+    assert.equal(await playingImage.getAttribute('src'),firstNotificationSource);
+    await notificationLink.evaluate(link=>{
+      window.fixtureNotificationLink=link;
+      link.remove();
+    });
+    await page.clock.runFor(80);
+    assert.equal(await playingImage.getAttribute('src'),firstNotificationSource);
+    await page.evaluate(()=>document.querySelector('header[role="banner"]').append(window.fixtureNotificationLink));
+    await page.clock.runFor(80);
+    await notificationBadge.evaluate(badge=>{badge.textContent='1';});
+    await page.clock.runFor(80);
+    assert.equal(await playingImage.getAttribute('src'),firstNotificationSource);
+    await page.clock.runFor(1000);
+    await page.waitForFunction(previous=>{
+      const image=document.querySelector('.xqc-notification-effect img');
+      return image && image.src!==previous;
+    },firstNotificationSource);
     await buddy.click();
     await effectsSwitch.uncheck();
+    await notificationEffect.waitFor({state:'detached'});
     await notificationBadge.evaluate(badge=>{badge.firstChild.data='2';});
     await page.clock.runFor(80);
     assert.equal(await notificationEffect.count(),0);

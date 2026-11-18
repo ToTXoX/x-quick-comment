@@ -900,7 +900,8 @@
   }
 
   function startNotificationEffects() {
-    let link, badge, unread, frame, stopPlayback;
+    let link, badge, unread, frame, stopPlayback, pendingOrigin;
+    let disposed=false;
     const observer=new MutationObserver(schedule);
 
     function schedule() {
@@ -934,43 +935,63 @@
       const count=labelCount ? Number(labelCount.replace(/\D/g,'')) : badgeCount;
       const previous=unread;
       unread=count;
-      if (count<previous) stopPlayback?.();
       if (previous===undefined || count<=previous || reducedMotion.matches) return;
-      const target=link;
-      void loadStickers.then(()=>{
-        if (link===target && target.isConnected && unread===count && !reducedMotion.matches) play();
-      });
+      const origin=notificationOrigin();
+      if (!origin) return;
+      pendingOrigin=origin;
+      if (!stopPlayback) void loadStickers.then(play);
+    }
+    function notificationOrigin() {
+      if (!link?.isConnected) return;
+      const anchor=badge?.isConnected ? badge : link.querySelector('svg') || link;
+      const {x,y,width,height}=anchor.getBoundingClientRect();
+      if (!width || !height) return;
+      return {x:x+width*(anchor===badge ? .5 : .85),y:y+height*(anchor===badge ? .5 : .15)};
     }
     function play() {
+      if (disposed || stopPlayback || !pendingOrigin || reducedMotion.matches) return;
+      let origin=pendingOrigin;
+      pendingOrigin=undefined;
       const sticker=currentSticker();
       if (!sticker.gif) return;
-      stopPlayback?.();
       const playback=createLikeEffect(sticker,stop);
-      let positionFrame;
-      const timeout=setTimeout(stop,sticker.duration);
+      const image=playback.element.firstElementChild;
+      let positionFrame, timeout;
       function stop() {
+        if (stopPlayback!==stop) return;
+        stopPlayback=undefined;
         cancelAnimationFrame(positionFrame);
         clearTimeout(timeout);
         playback.stop();
-        stopPlayback=undefined;
+        play();
       }
       function position() {
-        if (!link?.isConnected || reducedMotion.matches) return stop();
-        const anchor=badge?.isConnected ? badge : link.querySelector('svg') || link;
-        const {x,y,width,height}=anchor.getBoundingClientRect();
-        if (!width || !height) return stop();
-        playback.element.style.left=`${x+width*(anchor===badge ? .5 : .85)}px`;
-        playback.element.style.top=`${y+height*(anchor===badge ? .5 : .15)}px`;
+        if (reducedMotion.matches) {
+          pendingOrigin=undefined;
+          stop();
+          return;
+        }
+        // Reading the notification can remove its badge or briefly replace the menu.
+        if (badge?.isConnected) origin=notificationOrigin() ?? origin;
+        playback.element.style.left=`${origin.x}px`;
+        playback.element.style.top=`${origin.y}px`;
         positionFrame=requestAnimationFrame(position);
       }
       stopPlayback=stop;
-      playback.element.classList.add('xqc-notification-effect');
-      (document.getElementById('layers')?.parentElement || document.body).append(playback.element);
-      position();
+      void image.decode().then(()=>{
+        if (stopPlayback!==stop || reducedMotion.matches) return stop();
+        image.addEventListener('animationend',stop,{once:true});
+        playback.element.classList.add('xqc-notification-effect');
+        (document.getElementById('layers')?.parentElement || document.body).append(playback.element);
+        timeout=setTimeout(stop,sticker.duration+100);
+        position();
+      },stop);
     }
     pageUpdates.add(onPageUpdate);
     sync();
     return ()=>{
+      disposed=true;
+      pendingOrigin=undefined;
       pageUpdates.delete(onPageUpdate);
       observer.disconnect();
       cancelAnimationFrame(frame);
